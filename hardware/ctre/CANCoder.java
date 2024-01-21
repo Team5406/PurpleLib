@@ -5,6 +5,7 @@
 package org.lasarobotics.hardware.ctre;
 
 import org.lasarobotics.hardware.LoggableHardware;
+import org.lasarobotics.hardware.revrobotics.SparkInputsAutoLogged;
 import org.littletonrobotics.junction.AutoLog;
 import org.littletonrobotics.junction.Logger;
 
@@ -31,9 +32,10 @@ public class CANCoder implements LoggableHardware, AutoCloseable {
      * @param name Device name for logging
      * @param deviceID CAN ID
      */
-    public ID(String name, int deviceID) {
+    public ID(String name, PhoenixCANBus bus, int deviceID) {
       this.name = name;
       this.deviceID = deviceID;
+      this.bus = bus;
     }
   }
 
@@ -56,6 +58,7 @@ public class CANCoder implements LoggableHardware, AutoCloseable {
   public CANCoder(ID id) {
     this.m_id = id;
     this.m_canCoder = new com.ctre.phoenix6.hardware.CANcoder(m_id.deviceID, m_id.bus.name);
+    this.m_inputs = new CANCoderInputsAutoLogged();
   }
 
    /**

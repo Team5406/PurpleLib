@@ -1,4 +1,4 @@
-// Copyright (c) LASA Robotics and other contributors
+  // Copyright (c) LASA Robotics and other contributors
 // Open Source Software; you can modify and/or share it under the terms of
 // the MIT license file in the root directory of this project.
 
@@ -7,6 +7,7 @@ package org.lasarobotics.drive;
 import java.time.Duration;
 import java.time.Instant;
 
+import org.lasarobotics.hardware.ctre.CANCoder;
 import org.lasarobotics.hardware.revrobotics.Spark;
 import org.lasarobotics.hardware.revrobotics.Spark.MotorKind;
 import org.lasarobotics.hardware.revrobotics.SparkPIDConfig;
@@ -29,18 +30,20 @@ import edu.wpi.first.units.Time;
 import edu.wpi.first.units.Units;
 import edu.wpi.first.units.Velocity;
 
-/** REV MAXSwerve module */
+/** SDSMK4 module */
 public class SDSMK4SwerveModule implements AutoCloseable {
   /**
-   * MAXSwerve module hardware
+   * SDSMK4 module hardware
    */
   public static class Hardware {
     private Spark driveMotor;
     private Spark rotateMotor;
+    private CANCoder absoluteEncoder;
 
-    public Hardware(Spark driveMotor, Spark rotateMotor) {
+    public Hardware(Spark driveMotor, Spark rotateMotor, CANCoder absoluteEncoder) {
       this.driveMotor = driveMotor;
       this.rotateMotor = rotateMotor;
+      this.absoluteEncoder = absoluteEncoder;
     }
   }
 
@@ -85,7 +88,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private final int ROTATE_MOTOR_CURRENT_LIMIT = 30;
   private final Rotation2d LOCK_POSITION = Rotation2d.fromRadians(Math.PI / 4);
 
-  private static final double DRIVE_WHEEL_DIAMETER_METERS = Units.Inches.of(3).in(Units.Meters); // 4" wheels
+  private static final double DRIVE_WHEEL_DIAMETER_METERS = Units.Inches.of(4).in(Units.Meters); // 4" wheels
   private static final double DRIVETRAIN_EFFICIENCY = 0.90;
   private static final double MAX_AUTO_LOCK_TIME = 10.0;
   private final double DRIVE_TICKS_PER_METER;
@@ -110,6 +113,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
   private Spark m_driveMotor;
   private Spark m_rotateMotor;
+  private CANCoder m_absoluteEncoder;
   private Translation2d m_moduleCoordinate;
   private ModuleLocation m_location;
   private Rotation2d m_previousRotatePosition;
@@ -125,9 +129,10 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
   private TractionControlController m_tractionControlController;
   private Instant m_autoLockTimer;
+  private double moduleSynchronizationCounter = 0;
 
   /**
-   * Create an instance of a MAXSwerveModule
+   * Create an instance of a SDSM4SwerveModule
    * @param swerveHardware Hardware devices required by swerve module
    * @param location Location of module
    * @param driveGearRatio Gear ratio for driving wheel
@@ -145,6 +150,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
     this.m_driveMotor = swerveHardware.driveMotor;
     this.m_rotateMotor = swerveHardware.rotateMotor;
+    this.m_absoluteEncoder = swerveHardware.absoluteEncoder;
     this.m_location = location;
     this.m_driveGearRatio = driveGearRatio;
     this.m_autoLock = true;
@@ -162,8 +168,8 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
     // Set rotate encoder conversion factor
     m_rotateConversionFactor = 2 * Math.PI;
-    m_rotateMotor.setPositionConversionFactor(Spark.FeedbackSensor.THROUGH_BORE_ENCODER, m_rotateConversionFactor);
-    m_rotateMotor.setVelocityConversionFactor(Spark.FeedbackSensor.THROUGH_BORE_ENCODER, m_rotateConversionFactor / 60);
+    m_rotateMotor.setPositionConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_rotateConversionFactor);
+    m_rotateMotor.setVelocityConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_rotateConversionFactor / 60);
 
     // Enable PID wrapping
     m_rotateMotor.enablePIDWrapping(0.0, m_rotateConversionFactor);
@@ -192,7 +198,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
     // Initialize PID
     m_driveMotor.initializeSparkPID(driveMotorConfig, Spark.FeedbackSensor.NEO_ENCODER);
-    m_rotateMotor.initializeSparkPID(rotateMotorConfig, Spark.FeedbackSensor.THROUGH_BORE_ENCODER);
+    m_rotateMotor.initializeSparkPID(rotateMotorConfig, Spark.FeedbackSensor.NEO_ENCODER);
 
     // Set drive motor to coast
     m_driveMotor.setIdleMode(IdleMode.kCoast);
@@ -207,9 +213,13 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     // Reset encoder
     resetDriveEncoder();
 
+
+    m_absoluteEncoder.periodic();
+    m_rotateMotor.resetEncoder(m_absoluteEncoder.getInputs().absolutePosition);
+
     // Add motors to REVPhysicsSim
     m_driveMotor.addToSimulation(DCMotor.getNEO(1));
-    m_rotateMotor.addToSimulation(DCMotor.getNeo550(1));
+    m_rotateMotor.addToSimulation(DCMotor.getNEO(1));
 
     // Calculate module coordinate
     switch (location) {
@@ -239,19 +249,20 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   }
 
   /**
-   * Initialize hardware devices for MAXSwerve module
+   * Initialize hardware devices for SDSMK4 Swerve module
    * @param driveMotorID Drive motor ID
    * @param rotateMotorID Rotate motor ID
    * @param driveMotorKind Kind of drive motor
    * @return Hardware object containing all necessary objects for a MAXSwerve module
    * @throws IllegalArgumentException If specified drive motor is not supported
    */
-  public static Hardware initializeHardware(Spark.ID driveMotorID, Spark.ID rotateMotorID, MotorKind driveMotorKind) {
+  public static Hardware initializeHardware(Spark.ID driveMotorID, Spark.ID rotateMotorID, MotorKind driveMotorKind, CANCoder.ID absoluteEncoderID) {
     if (driveMotorKind != MotorKind.NEO && driveMotorKind != MotorKind.NEO_VORTEX)
       throw new IllegalArgumentException("Drive motor MUST be a NEO or a NEO Vortex!");
     Hardware swerveModuleHardware = new Hardware(
       new Spark(driveMotorID, driveMotorKind),
-      new Spark(rotateMotorID, MotorKind.NEO_550)
+      new Spark(rotateMotorID, MotorKind.NEO),
+      new CANCoder(absoluteEncoderID)
     );
 
     return swerveModuleHardware;
@@ -273,7 +284,13 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   public void periodic() {
     m_driveMotor.periodic();
     m_rotateMotor.periodic();
+    m_absoluteEncoder.periodic();
+    if(Math.abs(getRotationVelocity().magnitude()) <= EPSILON && ++moduleSynchronizationCounter > 5){
+      m_rotateMotor.resetEncoder(m_absoluteEncoder.getInputs().absolutePosition);
+      moduleSynchronizationCounter = 0;
+    }
   }
+
 
   /**
    * Call this method periodically during simulation
@@ -309,7 +326,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
     // Optimize swerve module rotation state
     // REV encoder returns an angle in radians
-    desiredState = SwerveModuleState.optimize(desiredState, Rotation2d.fromRadians(m_rotateMotor.getInputs().absoluteEncoderPosition));
+    desiredState = SwerveModuleState.optimize(desiredState, Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition));
 
     // Set rotate motor position
     m_rotateMotor.set(desiredState.angle.getRadians(), ControlType.kPosition);
@@ -370,13 +387,21 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   }
 
   /**
+   * Get velocity of rotation motor
+   * @return velocity of rotation motor in rad/s
+   */
+  public Measure<Velocity<Angle>> getRotationVelocity() {
+    return Units.RadiansPerSecond.of(m_rotateMotor.getInputs().encoderVelocity);
+  }
+
+  /**
    * Get current module state
    * @return Current module state
    */
   public SwerveModuleState getState() {
     return new SwerveModuleState(
       getDriveVelocity(),
-      Rotation2d.fromRadians(m_rotateMotor.getInputs().absoluteEncoderPosition).minus(m_location.offset)
+      Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition).minus(m_location.offset)
     );
   }
 
@@ -387,7 +412,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   public SwerveModulePosition getPosition() {
     return new SwerveModulePosition(
       m_driveMotor.getInputs().encoderPosition,
-      Rotation2d.fromRadians(m_rotateMotor.getInputs().absoluteEncoderPosition).minus(m_location.offset)
+      Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition).minus(m_location.offset)
     );
   }
 
