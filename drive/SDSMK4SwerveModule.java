@@ -75,7 +75,10 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     /** 6.12:1 */
     L3(6.12),
     /** 5.14:1 */
-    L4(5.14);
+    L4(5.14),
+    /** Steering gear ratio: 12.8:1 */
+    STEER(12.8);
+;
 
     public final double value;
     private GearRatio(double value) {
@@ -167,7 +170,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     m_driveMotor.setVelocityConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_driveConversionFactor / 60);
 
     // Set rotate encoder conversion factor
-    m_rotateConversionFactor = 2 * Math.PI;
+    m_rotateConversionFactor = (2 * Math.PI )/ GearRatio.STEER.value;
     m_rotateMotor.setPositionConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_rotateConversionFactor);
     m_rotateMotor.setVelocityConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_rotateConversionFactor / 60);
 
