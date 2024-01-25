@@ -175,7 +175,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     m_rotateMotor.setVelocityConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_rotateConversionFactor / 60);
 
     // Enable PID wrapping
-    m_rotateMotor.enablePIDWrapping(0.0, m_rotateConversionFactor);
+    m_rotateMotor.enablePIDWrapping(-m_rotateConversionFactor/2, m_rotateConversionFactor/2);
 
     // Create PID configs
     SparkPIDConfig driveMotorConfig = new SparkPIDConfig(
