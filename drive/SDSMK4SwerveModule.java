@@ -49,10 +49,10 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
   /** Module location */
   public enum ModuleLocation {
-    LeftFront(0, Rotation2d.fromRadians(-Math.PI / 2)),
+    LeftFront(0, Rotation2d.fromRadians(+0.0)),
     RightFront(1, Rotation2d.fromRadians(+0.0)),
-    LeftRear(2, Rotation2d.fromRadians(+Math.PI)),
-    RightRear(3, Rotation2d.fromRadians(+Math.PI / 2));
+    LeftRear(2, Rotation2d.fromRadians(+0.0)),
+    RightRear(3, Rotation2d.fromRadians(+0.0));
 
     /** Module index */
     public final int index;
