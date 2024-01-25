@@ -51,9 +51,9 @@ public class CANCoder implements LoggableHardware, AutoCloseable {
   private ID m_id;
   private CANCoderInputsAutoLogged m_inputs;
 
-  private double m_absolutePositionCoefficient = 1.0;
-  private double m_relativePositionCoefficient = 1.0;
-  private double m_velocityCoefficient = 1.0;
+  private double m_absolutePositionCoefficient = 2*Math.PI;
+  private double m_relativePositionCoefficient = 2*Math.PI;
+  private double m_velocityCoefficient = 2*Math.PI;
 
   public CANCoder(ID id) {
     this.m_id = id;
