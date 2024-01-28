@@ -106,12 +106,12 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private static final boolean DRIVE_INVERT_MOTOR = false;
 
   // Swerve rotate PID settings
-  private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(1.0, 0.0, 0.0, 0.0);
-  private static final double DRIVE_ROTATE_TOLERANCE = 0.01;
+  private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(0.5, 0.0, 0.0, 0.0);
+  private static final double DRIVE_ROTATE_TOLERANCE = 0.02;
   private static final double DRIVE_ROTATE_LOWER_LIMIT = 0.0;
   private static final double DRIVE_ROTATE_UPPER_LIMIT = 0.0;
   private static final boolean DRIVE_ROTATE_SOFT_LIMITS = false;
-  private static final boolean DRIVE_ROTATE_SENSOR_PHASE = true;
+  private static final boolean DRIVE_ROTATE_SENSOR_PHASE = false;
   private static final boolean DRIVE_ROTATE_INVERT_MOTOR = false;
 
   private Spark m_driveMotor;
@@ -175,7 +175,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     m_rotateMotor.setVelocityConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_rotateConversionFactor / 60);
 
     // Enable PID wrapping
-    m_rotateMotor.enablePIDWrapping(-m_rotateConversionFactor/2, m_rotateConversionFactor/2);
+    //m_rotateMotor.enablePIDWrapping(-m_rotateConversionFactor/2, m_rotateConversionFactor/2);
 
     // Create PID configs
     SparkPIDConfig driveMotorConfig = new SparkPIDConfig(
