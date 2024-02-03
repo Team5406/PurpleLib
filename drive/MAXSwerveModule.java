@@ -4,6 +4,12 @@
 
 package org.lasarobotics.drive;
 
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 
@@ -12,6 +18,7 @@ import org.lasarobotics.hardware.revrobotics.Spark.MotorKind;
 import org.lasarobotics.hardware.revrobotics.SparkPIDConfig;
 import org.lasarobotics.utils.GlobalConstants;
 import org.lasarobotics.utils.PIDConstants;
+import org.littletonrobotics.junction.Logger;
 
 import com.revrobotics.CANSparkBase.ControlType;
 import com.revrobotics.CANSparkBase.IdleMode;
@@ -21,8 +28,8 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
-import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.units.Angle;
+import edu.wpi.first.units.Current;
 import edu.wpi.first.units.Distance;
 import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Time;
@@ -70,7 +77,17 @@ public class MAXSwerveModule implements AutoCloseable {
     /** 5.08:1 */
     L2(5.08),
     /** 4.71:1 */
-    L3(4.71);
+    L3(4.71),
+    /** 4.50:1 */
+    L4(4.50),
+    /** 4.29:1 */
+    L5(4.29),
+    /** 4.00:1 */
+    L6(4.00),
+    /** 3.75:1 */
+    L7(3.75),
+    /** 3.56:1 */
+    L8(3.56);
 
     public final double value;
     private GearRatio(double value) {
@@ -79,10 +96,12 @@ public class MAXSwerveModule implements AutoCloseable {
   }
 
   private final double EPSILON = 5e-3;
-  private final int DRIVE_MOTOR_CURRENT_LIMIT = 50;
+  private final int DRIVE_MOTOR_CURRENT_LIMIT;
   private final int ROTATE_MOTOR_CURRENT_LIMIT = 20;
   private final Rotation2d LOCK_POSITION = Rotation2d.fromRadians(Math.PI / 4);
 
+  private static final String IS_SLIPPING_LOG_ENTRY = "/IsSlipping";
+  private static final String ODOMETER_LOG_ENTRY = "/Odometer";
   private static final double DRIVE_WHEEL_DIAMETER_METERS = 0.0762; // 3" wheels
   private static final double DRIVETRAIN_EFFICIENCY = 0.90;
   private static final double MAX_AUTO_LOCK_TIME = 10.0;
@@ -120,6 +139,8 @@ public class MAXSwerveModule implements AutoCloseable {
   private double m_radius;
   private double m_autoLockTime;
   private boolean m_autoLock;
+  private double m_runningOdometer;
+  private String m_odometerOutputPath;
 
   private TractionControlController m_tractionControlController;
   private Instant m_autoLockTimer;
@@ -132,14 +153,23 @@ public class MAXSwerveModule implements AutoCloseable {
    * @param wheelbase Robot wheelbase
    * @param trackWidth Robot track width
    * @param autoLockTime Time before rotating module to locked position [0.0, 10.0]
-   * @param slipRatio Desired slip ratio
+   * @param maxSlippingTime Maximum time that wheel is allowed to slip
+   * @param driveMotorCurrentLimit Desired current limit for the drive motor
+   * @param slipRatio Desired slip ratio [+0.01, +0.40]
    */
   public MAXSwerveModule(Hardware swerveHardware, ModuleLocation location, GearRatio driveGearRatio,
-                         Measure<Distance> wheelbase, Measure<Distance> trackWidth, Measure<Time> autoLockTime, double slipRatio) {
-    DRIVE_TICKS_PER_METER = (GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION * driveGearRatio.value) * (1 / (DRIVE_WHEEL_DIAMETER_METERS * Math.PI));
+                         Measure<Distance> wheelbase, Measure<Distance> trackWidth, Measure<Time> autoLockTime,
+                         Measure<Time> maxSlippingTime, Measure<Current> driveMotorCurrentLimit, double slipRatio) {
+    int encoderTicksPerRotation = swerveHardware.driveMotor.getKind().equals(MotorKind.NEO)
+      ? GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION
+      : GlobalConstants.VORTEX_ENCODER_TICKS_PER_ROTATION;
+    DRIVE_MOTOR_CURRENT_LIMIT = (int)driveMotorCurrentLimit.in(Units.Amps);
+    DRIVE_TICKS_PER_METER =
+      (encoderTicksPerRotation * driveGearRatio.value)
+      * (1 / (DRIVE_WHEEL_DIAMETER_METERS * Math.PI));
     DRIVE_METERS_PER_TICK = 1 / DRIVE_TICKS_PER_METER;
-    DRIVE_METERS_PER_ROTATION = DRIVE_METERS_PER_TICK * GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION;
-    DRIVE_MAX_LINEAR_SPEED = (GlobalConstants.NEO_MAX_RPM / 60) * DRIVE_METERS_PER_ROTATION * DRIVETRAIN_EFFICIENCY;
+    DRIVE_METERS_PER_ROTATION = DRIVE_METERS_PER_TICK * encoderTicksPerRotation;
+    DRIVE_MAX_LINEAR_SPEED = (swerveHardware.driveMotor.getKind().getMaxRPM() / 60) * DRIVE_METERS_PER_ROTATION * DRIVETRAIN_EFFICIENCY;
 
     this.m_driveMotor = swerveHardware.driveMotor;
     this.m_rotateMotor = swerveHardware.rotateMotor;
@@ -150,8 +180,9 @@ public class MAXSwerveModule implements AutoCloseable {
     this.m_simRotatePosition = 0.0;
     this.m_autoLockTime = MathUtil.clamp(autoLockTime.in(Units.Milliseconds), 0.0, MAX_AUTO_LOCK_TIME * 1000);
     this.m_previousRotatePosition = LOCK_POSITION;
-    this.m_tractionControlController =  new TractionControlController(Units.MetersPerSecond.of(DRIVE_MAX_LINEAR_SPEED), slipRatio);
+    this.m_tractionControlController =  new TractionControlController(Units.MetersPerSecond.of(DRIVE_MAX_LINEAR_SPEED), maxSlippingTime, slipRatio);
     this.m_autoLockTimer = Instant.now();
+    this.m_runningOdometer = 0.0;
 
     // Set drive encoder conversion factor
     m_driveConversionFactor = DRIVE_WHEEL_DIAMETER_METERS * Math.PI / m_driveGearRatio.value;
@@ -205,10 +236,6 @@ public class MAXSwerveModule implements AutoCloseable {
     // Reset encoder
     resetDriveEncoder();
 
-    // Add motors to REVPhysicsSim
-    m_driveMotor.addToSimulation(DCMotor.getNEO(1));
-    m_rotateMotor.addToSimulation(DCMotor.getNeo550(1));
-
     // Calculate module coordinate
     switch (location) {
       case LeftFront:
@@ -234,6 +261,22 @@ public class MAXSwerveModule implements AutoCloseable {
     // Make sure settings are burned to flash
     m_driveMotor.burnFlash();
     m_rotateMotor.burnFlash();
+
+    // Read odometer file if exists
+    m_odometerOutputPath = (m_driveMotor.getID().name + "-odometer.txt").replace('/', '-');
+    File file = new File(m_odometerOutputPath);
+    Measure<Distance> previousDistanceTraveled = Units.Meters.of(0.0);
+    if (file.exists()) {
+      try {
+        previousDistanceTraveled =
+          Units.Meters.of(Double.parseDouble(
+            new String(Files.readAllBytes(Paths.get(m_odometerOutputPath)), StandardCharsets.UTF_8)
+          ));
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+    }
+    m_runningOdometer += previousDistanceTraveled.in(Units.Meters);
   }
 
   /**
@@ -271,6 +314,8 @@ public class MAXSwerveModule implements AutoCloseable {
   public void periodic() {
     m_driveMotor.periodic();
     m_rotateMotor.periodic();
+    Logger.recordOutput(m_driveMotor.getID().name + IS_SLIPPING_LOG_ENTRY, isSlipping());
+    Logger.recordOutput(m_driveMotor.getID().name + ODOMETER_LOG_ENTRY, m_runningOdometer);
   }
 
   /**
@@ -321,13 +366,16 @@ public class MAXSwerveModule implements AutoCloseable {
 
     // Save rotate position
     m_previousRotatePosition = desiredState.angle;
+
+    // Increment odometer
+    m_runningOdometer += Math.abs(desiredState.speedMetersPerSecond) * GlobalConstants.ROBOT_LOOP_PERIOD;
   }
 
   /**
    * Set swerve module direction and speed, automatically applying traction control
    * @param state Desired swerve module state
    * @param inertialVelocity Current inertial velocity
-   * @param rotateRate Current rotate rate
+   * @param rotateRate Desired robot rotate rate
    */
   public void set(SwerveModuleState state, Measure<Velocity<Distance>> inertialVelocity, Measure<Velocity<Angle>> rotateRate) {
     // Apply traction control
@@ -390,6 +438,14 @@ public class MAXSwerveModule implements AutoCloseable {
   }
 
   /**
+   * Get if drive wheel is slipping
+   * @return True if wheel is slipping excessively
+   */
+  public boolean isSlipping() {
+    return m_tractionControlController.isSlipping();
+  }
+
+  /**
    * Reset drive motor encoder
    */
   public void resetDriveEncoder() {
@@ -446,7 +502,7 @@ public class MAXSwerveModule implements AutoCloseable {
 
   /**
    * Get maximum drive speed of module
-   * @return Max linear speed (m/s)
+   * @return Max linear speed
    */
   public Measure<Velocity<Distance>> getMaxLinearSpeed() {
     return Units.MetersPerSecond.of(DRIVE_MAX_LINEAR_SPEED);
@@ -469,11 +525,46 @@ public class MAXSwerveModule implements AutoCloseable {
   }
 
   /**
+   * Reset the total distance the swerve module has traveled
+   */
+  public void clearRunningOdometer() {
+    m_runningOdometer = 0.0;
+    try {
+      FileWriter fileWriter = new FileWriter(m_odometerOutputPath);
+      fileWriter.write(String.valueOf(m_runningOdometer));
+      fileWriter.close();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+  }
+
+  /**
+   * Get the total distance the swerve module has traveled
+   * @return Odometer value for the swerve module
+   */
+  public Measure<Distance> getRunningOdometer() {
+    return Units.Meters.of(m_runningOdometer);
+  }
+
+  /**
    * Stop swerve module
    */
   public void stop() {
     m_rotateMotor.stopMotor();
     m_driveMotor.stopMotor();
+  }
+
+  /**
+   * Update swerve odometer on disable
+   */
+  public void disabled() {
+    try {
+      FileWriter fileWriter = new FileWriter(m_odometerOutputPath);
+      fileWriter.write(String.valueOf(m_runningOdometer));
+      fileWriter.close();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
   }
 
   @Override

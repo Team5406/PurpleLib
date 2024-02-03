@@ -33,7 +33,9 @@ import com.revrobotics.SparkPIDController;
 import edu.wpi.first.math.filter.Debouncer;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
-import edu.wpi.first.math.util.Units;
+import edu.wpi.first.units.Measure;
+import edu.wpi.first.units.Time;
+import edu.wpi.first.units.Units;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.Timer;
 
@@ -77,7 +79,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
      * @return Max RPM
      */
     public double getMaxRPM() {
-      return Units.radiansPerSecondToRotationsPerMinute(motor.freeSpeedRadPerSec);
+      return edu.wpi.first.math.util.Units.radiansPerSecondToRotationsPerMinute(motor.freeSpeedRadPerSec);
     }
   }
 
@@ -138,8 +140,12 @@ public class Spark implements LoggableHardware, AutoCloseable {
    * @param kind The kind of motor connected to the controller
    */
   public Spark(ID id, MotorKind kind) {
-    if (kind == MotorKind.NEO_VORTEX) this.m_spark = new CANSparkFlex(id.deviceID, kind.type);
-    else this.m_spark = new CANSparkMax(id.deviceID, kind.type);
+    if (kind == MotorKind.NEO_VORTEX) {
+      this.m_spark = new CANSparkFlex(id.deviceID, kind.type);
+    } else {
+      this.m_spark = new CANSparkMax(id.deviceID, kind.type);
+      REVPhysicsSim.getInstance().addSparkMax((CANSparkMax)m_spark, kind.motor);
+    }
     this.m_id = id;
     this.m_kind = kind;
     this.m_inputs = new SparkInputsAutoLogged();
@@ -147,8 +153,6 @@ public class Spark implements LoggableHardware, AutoCloseable {
 
     m_spark.restoreFactoryDefaults();
     m_spark.enableVoltageCompensation(MAX_VOLTAGE);
-
-    REVPhysicsSim.getInstance().addSparkMax((CANSparkMax)m_spark, kind.motor);
   }
 
   /**
@@ -176,7 +180,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
    * @param parameterCheckSupplier Method to check for parameter in question
    * @return {@link REVLibError#kOk} if successful
    */
-  REVLibError applyParameter(Supplier<REVLibError> parameterSetter, BooleanSupplier parameterCheckSupplier, String errorMessage) {
+  private REVLibError applyParameter(Supplier<REVLibError> parameterSetter, BooleanSupplier parameterCheckSupplier, String errorMessage) {
     if (RobotBase.isSimulation()) return parameterSetter.get();
 
     REVLibError status = REVLibError.kError;
@@ -197,7 +201,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
    */
   private void checkStatus(REVLibError status, String errorMessage) {
     if (status != REVLibError.kOk)
-      System.out.println(String.join(" ", m_id.name, errorMessage, "-", status.toString()));
+      System.err.println(String.join(" ", m_id.name, errorMessage, "-", status.toString()));
   }
 
   /**
@@ -208,8 +212,6 @@ public class Spark implements LoggableHardware, AutoCloseable {
   private void logOutputs(double value, ControlType ctrl) {
     Logger.recordOutput(m_id.name + VALUE_LOG_ENTRY, value);
     Logger.recordOutput(m_id.name + MODE_LOG_ENTRY, ctrl.toString());
-    Logger.recordOutput(m_id.name + CURRENT_LOG_ENTRY, m_spark.getOutputCurrent());
-    Logger.recordOutput(m_id.name + MOTION_LOG_ENTRY, m_isSmoothMotionEnabled);
   }
 
   /**
@@ -330,7 +332,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
   private void handleSmoothMotion() {
     if (!m_isSmoothMotionEnabled) return;
 
-    m_smoothMotionState = m_motionProfile.calculate(GlobalConstants.ROBOT_LOOP_PERIOD, m_currentStateSupplier.get(), m_desiredState);
+    m_smoothMotionState = m_motionProfile.calculate(GlobalConstants.ROBOT_LOOP_PERIOD, m_smoothMotionState, m_desiredState);
     set(
       m_smoothMotionState.position,
       ControlType.kPosition,
@@ -371,14 +373,6 @@ public class Spark implements LoggableHardware, AutoCloseable {
   }
 
   /**
-   * Add motor to simulation
-   * @param motor Motor that is connected to this Spark
-   */
-  public void addToSimulation(DCMotor motor) {
-    REVPhysicsSim.getInstance().addSparkMax((CANSparkMax)m_spark, motor);
-  }
-
-  /**
    * Call this method periodically
    */
   @Override
@@ -387,6 +381,9 @@ public class Spark implements LoggableHardware, AutoCloseable {
     Logger.processInputs(m_id.name, m_inputs);
 
     handleSmoothMotion();
+
+    Logger.recordOutput(m_id.name + CURRENT_LOG_ENTRY, m_spark.getOutputCurrent());
+    Logger.recordOutput(m_id.name + MOTION_LOG_ENTRY, m_isSmoothMotionEnabled);
   }
 
   /**
@@ -745,7 +742,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     m_motionConstraint = motionConstraint;
     m_desiredState = new TrapezoidProfile.State(value, 0.0);
     m_motionProfile = new TrapezoidProfile(m_motionConstraint);
-    m_smoothMotionState = m_desiredState;
+    m_smoothMotionState = m_currentStateSupplier.get();
   }
 
   /**
@@ -940,7 +937,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     status = applyParameter(
       () -> m_spark.getPIDController().setPositionPIDWrappingEnabled(false),
       () -> m_spark.getPIDController().getPositionPIDWrappingEnabled() == false,
-      "Disable position PID wrapping failure"
+      "Disable position PID wrapping failure!"
     );
     return status;
   }
@@ -982,6 +979,30 @@ public class Spark implements LoggableHardware, AutoCloseable {
       "Set current limit failure!"
     );
     return status;
+  }
+
+  /**
+   * Sets the ramp rate for open loop control modes.
+   *
+   * <p>This is the maximum rate at which the motor controller's output is allowed to change.
+   *
+   * @param rampTime Time to go from 0 to full throttle.
+   * @return {@link REVLibError#kOk} if successful
+   */
+  public REVLibError setOpenLoopRampRate(Measure<Time> rampTime) {
+    return m_spark.setOpenLoopRampRate(rampTime.in(Units.Seconds));
+  }
+
+  /**
+   * Sets the ramp rate for closed loop control modes.
+   *
+   * <p>This is the maximum rate at which the motor controller's output is allowed to change.
+   *
+   * @param rampTime Time to go from 0 to full throttle.
+   * @return {@link REVLibError#kOk} if successful
+   */
+  public REVLibError setClosedLoopRampRate(Measure<Time> rampTime) {
+    return m_spark.setClosedLoopRampRate(rampTime.in(Units.Seconds));
   }
 
   /**
