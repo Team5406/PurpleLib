@@ -24,6 +24,7 @@ import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.units.Angle;
+import edu.wpi.first.units.Current;
 import edu.wpi.first.units.Distance;
 import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Time;
@@ -142,10 +143,14 @@ public class SDSMK4SwerveModule implements AutoCloseable {
    * @param wheelbase Robot wheelbase
    * @param trackWidth Robot track width
    * @param autoLockTime Time before rotating module to locked position [0.0, 10.0]
-   * @param slipRatio Desired slip ratio
+   * @param maxSlippingTime Maximum time that wheel is allowed to slip
+   * @param driveMotorCurrentLimit Desired current limit for the drive motor
+   * @param slipRatio Desired slip ratio [+0.01, +0.40]
    */
   public SDSMK4SwerveModule(Hardware swerveHardware, ModuleLocation location, GearRatio driveGearRatio,
-                         Measure<Distance> wheelbase, Measure<Distance> trackWidth, Measure<Time> autoLockTime, double slipRatio) {
+                         Measure<Distance> wheelbase, Measure<Distance> trackWidth, Measure<Time> autoLockTime,
+                         Measure<Time> maxSlippingTime, Measure<Current> driveMotorCurrentLimit, double slipRatio) {
+
     DRIVE_TICKS_PER_METER = (GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION * driveGearRatio.value) * (1 / (DRIVE_WHEEL_DIAMETER_METERS * Math.PI));
     DRIVE_METERS_PER_TICK = 1 / DRIVE_TICKS_PER_METER;
     DRIVE_METERS_PER_ROTATION = DRIVE_METERS_PER_TICK * GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION;
@@ -161,7 +166,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     this.m_simRotatePosition = 0.0;
     this.m_autoLockTime = MathUtil.clamp(autoLockTime.in(Units.Milliseconds), 0.0, MAX_AUTO_LOCK_TIME * 1000);
     this.m_previousRotatePosition = LOCK_POSITION;
-    this.m_tractionControlController =  new TractionControlController(Units.MetersPerSecond.of(DRIVE_MAX_LINEAR_SPEED), slipRatio);
+    this.m_tractionControlController =  new TractionControlController(Units.MetersPerSecond.of(DRIVE_MAX_LINEAR_SPEED), maxSlippingTime, slipRatio);
     this.m_autoLockTimer = Instant.now();
 
     // Set drive encoder conversion factor
@@ -219,10 +224,6 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
     m_absoluteEncoder.periodic();
     m_rotateMotor.resetEncoder(m_absoluteEncoder.getInputs().absolutePosition);
-
-    // Add motors to REVPhysicsSim
-    m_driveMotor.addToSimulation(DCMotor.getNEO(1));
-    m_rotateMotor.addToSimulation(DCMotor.getNEO(1));
 
     // Calculate module coordinate
     switch (location) {
