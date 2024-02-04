@@ -761,6 +761,13 @@ public class Spark implements LoggableHardware, AutoCloseable {
     m_spark.getEncoder().setPosition(0.0);
     System.out.println(String.join(" ", m_id.name, "Encoder reset!"));
   }
+  /**
+   * Reset NEO built-in encoder to given value
+   */
+  public void resetEncoder(double position) {
+    m_spark.getEncoder().setPosition(position);
+    System.out.println(String.join(" ", m_id.name, "Encoder reset to "+position+"!"));
+  }
 
   /**
    * Disable forward limit switch
