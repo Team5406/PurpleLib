@@ -22,7 +22,6 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
-import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.units.Angle;
 import edu.wpi.first.units.Current;
 import edu.wpi.first.units.Distance;
@@ -68,7 +67,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   /**
    * SDSMK4Swerve gear ratio
    */
-  public enum GearRatio {
+  public enum DriveGearRatio {
     /** 8.14:1 */
     L1(8.14),
     /** 6.75:1 */
@@ -76,20 +75,28 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     /** 6.12:1 */
     L3(6.12),
     /** 5.14:1 */
-    L4(5.14),
+    L4(5.14);
     /** Steering gear ratio: 12.8:1 */
-    STEER(12.8);
-;
 
     public final double value;
-    private GearRatio(double value) {
+    private DriveGearRatio(double value) {
+      this.value = value;
+    }
+  }
+
+  public enum SteerGearRatio {
+    STEER_MK4I((double)150/7), 
+    STEER_MK4(12.8);
+
+     public final double value;
+    private SteerGearRatio(double value) {
       this.value = value;
     }
   }
 
   private final double EPSILON = 5e-3;
-  private final int DRIVE_MOTOR_CURRENT_LIMIT = 50;
-  private final int ROTATE_MOTOR_CURRENT_LIMIT = 30;
+  private final int DRIVE_MOTOR_CURRENT_LIMIT;
+  private final int ROTATE_MOTOR_CURRENT_LIMIT;
   private final Rotation2d LOCK_POSITION = Rotation2d.fromRadians(Math.PI / 4);
 
   private static final double DRIVE_WHEEL_DIAMETER_METERS = Units.Inches.of(4).in(Units.Meters); // 4" wheels
@@ -122,7 +129,8 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private ModuleLocation m_location;
   private Rotation2d m_previousRotatePosition;
 
-  private GearRatio m_driveGearRatio;
+  private DriveGearRatio m_driveGearRatio;
+  private SteerGearRatio m_steerGearRatio;
   private double m_driveConversionFactor;
   private double m_rotateConversionFactor;
   private double m_simDrivePosition;
@@ -147,20 +155,25 @@ public class SDSMK4SwerveModule implements AutoCloseable {
    * @param driveMotorCurrentLimit Desired current limit for the drive motor
    * @param slipRatio Desired slip ratio [+0.01, +0.40]
    */
-  public SDSMK4SwerveModule(Hardware swerveHardware, ModuleLocation location, GearRatio driveGearRatio,
+  public SDSMK4SwerveModule(Hardware swerveHardware, ModuleLocation location, DriveGearRatio driveGearRatio, SteerGearRatio steerGearRatio,
                          Measure<Distance> wheelbase, Measure<Distance> trackWidth, Measure<Time> autoLockTime,
-                         Measure<Time> maxSlippingTime, Measure<Current> driveMotorCurrentLimit, double slipRatio) {
-
-    DRIVE_TICKS_PER_METER = (GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION * driveGearRatio.value) * (1 / (DRIVE_WHEEL_DIAMETER_METERS * Math.PI));
+                         Measure<Time> maxSlippingTime, Measure<Current> driveMotorCurrentLimit, Measure<Current> rotateMotorCurrentLimit, double slipRatio) {
+    int encoderTicksPerRotation = swerveHardware.driveMotor.getKind().equals(MotorKind.NEO)
+      ? GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION
+      : GlobalConstants.VORTEX_ENCODER_TICKS_PER_ROTATION;                    
+    DRIVE_TICKS_PER_METER = (encoderTicksPerRotation * driveGearRatio.value) * (1 / (DRIVE_WHEEL_DIAMETER_METERS * Math.PI));
     DRIVE_METERS_PER_TICK = 1 / DRIVE_TICKS_PER_METER;
-    DRIVE_METERS_PER_ROTATION = DRIVE_METERS_PER_TICK * GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION;
+    DRIVE_METERS_PER_ROTATION = DRIVE_METERS_PER_TICK * encoderTicksPerRotation;
     DRIVE_MAX_LINEAR_SPEED = (GlobalConstants.NEO_MAX_RPM / 60) * DRIVE_METERS_PER_ROTATION * DRIVETRAIN_EFFICIENCY;
+    DRIVE_MOTOR_CURRENT_LIMIT = (int)driveMotorCurrentLimit.in(Units.Amps);
+    ROTATE_MOTOR_CURRENT_LIMIT = (int)rotateMotorCurrentLimit.in(Units.Amps);
 
     this.m_driveMotor = swerveHardware.driveMotor;
     this.m_rotateMotor = swerveHardware.rotateMotor;
     this.m_absoluteEncoder = swerveHardware.absoluteEncoder;
     this.m_location = location;
     this.m_driveGearRatio = driveGearRatio;
+    this.m_steerGearRatio = steerGearRatio;
     this.m_autoLock = true;
     this.m_simDrivePosition = 0.0;
     this.m_simRotatePosition = 0.0;
@@ -175,7 +188,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     m_driveMotor.setVelocityConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_driveConversionFactor / 60);
 
     // Set rotate encoder conversion factor
-    m_rotateConversionFactor = (2 * Math.PI )/ GearRatio.STEER.value;
+    m_rotateConversionFactor = (2 * Math.PI )/ m_steerGearRatio.value;
     m_rotateMotor.setPositionConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_rotateConversionFactor);
     m_rotateMotor.setVelocityConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_rotateConversionFactor / 60);
 
@@ -260,12 +273,12 @@ public class SDSMK4SwerveModule implements AutoCloseable {
    * @return Hardware object containing all necessary objects for a MAXSwerve module
    * @throws IllegalArgumentException If specified drive motor is not supported
    */
-  public static Hardware initializeHardware(Spark.ID driveMotorID, Spark.ID rotateMotorID, MotorKind driveMotorKind, CANCoder.ID absoluteEncoderID) {
+  public static Hardware initializeHardware(Spark.ID driveMotorID, Spark.ID rotateMotorID, MotorKind driveMotorKind, MotorKind rotateMotorKind, CANCoder.ID absoluteEncoderID) {
     if (driveMotorKind != MotorKind.NEO && driveMotorKind != MotorKind.NEO_VORTEX)
       throw new IllegalArgumentException("Drive motor MUST be a NEO or a NEO Vortex!");
     Hardware swerveModuleHardware = new Hardware(
       new Spark(driveMotorID, driveMotorKind),
-      new Spark(rotateMotorID, MotorKind.NEO),
+      new Spark(rotateMotorID, rotateMotorKind),
       new CANCoder(absoluteEncoderID)
     );
 
@@ -495,9 +508,13 @@ public class SDSMK4SwerveModule implements AutoCloseable {
    * Get drive gear ratio
    * @return Gear ratio for driving wheel
    */
-  public GearRatio getDriveGearRatio() {
+  public DriveGearRatio getDriveGearRatio() {
     return m_driveGearRatio;
   }
+   public SteerGearRatio getSteerGearRatio() {
+    return m_steerGearRatio;
+  }
+ 
 
   /**
    * Stop swerve module
