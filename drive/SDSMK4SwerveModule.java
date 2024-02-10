@@ -30,6 +30,7 @@ import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Time;
 import edu.wpi.first.units.Units;
 import edu.wpi.first.units.Velocity;
+import frc.team5406.robot.Constants;
 
 /** SDSMK4 module */
 public class SDSMK4SwerveModule implements AutoCloseable {
@@ -50,10 +51,10 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
   /** Module location */
   public enum ModuleLocation {
-    LeftFront(0, Rotation2d.fromRadians(+0.0)),
-    RightFront(1, Rotation2d.fromRadians(+0.0)),
-    LeftRear(2, Rotation2d.fromRadians(+0.0)),
-    RightRear(3, Rotation2d.fromRadians(+0.0));
+    LeftFront(0, Rotation2d.fromRadians(LOCK_POSITION - Math.PI/4)),
+    RightFront(1, Rotation2d.fromRadians(LOCK_POSITION +0.0 )),
+    LeftRear(2, Rotation2d.fromRadians(LOCK_POSITION +Math.PI)),
+    RightRear(3, Rotation2d.fromRadians(LOCK_POSITION +Math.PI / 2));
 
     /** Module index */
     public final int index;
@@ -90,9 +91,8 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private final double EPSILON = 5e-3;
   private final int DRIVE_MOTOR_CURRENT_LIMIT = 50;
   private final int ROTATE_MOTOR_CURRENT_LIMIT = 30;
-  private final Rotation2d LOCK_POSITION = Rotation2d.fromRadians(Math.PI / 4);
-
-  private static final double DRIVE_WHEEL_DIAMETER_METERS = Units.Inches.of(4).in(Units.Meters); // 4" wheels
+  private static double LOCK_POSITION;
+  private static final double DRIVE_WHEEL_DIAMETER_METERS = Units.Inches.of(3.8).in(Units.Meters); // 4" wheels
   private static final double DRIVETRAIN_EFFICIENCY = 0.90;
   private static final double MAX_AUTO_LOCK_TIME = 10.0;
   private final double DRIVE_TICKS_PER_METER;
@@ -155,17 +155,18 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     DRIVE_METERS_PER_TICK = 1 / DRIVE_TICKS_PER_METER;
     DRIVE_METERS_PER_ROTATION = DRIVE_METERS_PER_TICK * GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION;
     DRIVE_MAX_LINEAR_SPEED = (GlobalConstants.NEO_MAX_RPM / 60) * DRIVE_METERS_PER_ROTATION * DRIVETRAIN_EFFICIENCY;
+    LOCK_POSITION = (Math.atan((trackWidth.in(Units.Meters)/2)/(wheelbase.in(Units.Meters)/2)));
 
     this.m_driveMotor = swerveHardware.driveMotor;
     this.m_rotateMotor = swerveHardware.rotateMotor;
     this.m_absoluteEncoder = swerveHardware.absoluteEncoder;
     this.m_location = location;
     this.m_driveGearRatio = driveGearRatio;
-    this.m_autoLock = true;
+    this.m_autoLock = false;
     this.m_simDrivePosition = 0.0;
     this.m_simRotatePosition = 0.0;
     this.m_autoLockTime = MathUtil.clamp(autoLockTime.in(Units.Milliseconds), 0.0, MAX_AUTO_LOCK_TIME * 1000);
-    this.m_previousRotatePosition = LOCK_POSITION;
+    this.m_previousRotatePosition = Rotation2d.fromRadians(LOCK_POSITION);
     this.m_tractionControlController =  new TractionControlController(Units.MetersPerSecond.of(DRIVE_MAX_LINEAR_SPEED), maxSlippingTime, slipRatio);
     this.m_autoLockTimer = Instant.now();
 
@@ -314,9 +315,9 @@ public class SDSMK4SwerveModule implements AutoCloseable {
       state.speedMetersPerSecond = 0.0;
       // Time's up, lock now...
       if (Duration.between(m_autoLockTimer, Instant.now()).toMillis() > m_autoLockTime)
-        state.angle = LOCK_POSITION.minus(m_location.offset);
+        state.angle = Rotation2d.fromRadians(LOCK_POSITION).minus(m_location.offset);
       // Waiting to lock...
-      else state.angle = m_previousRotatePosition.minus(m_location.offset);
+      else state.angle = m_previousRotatePosition;
     } else {
       // Not locking this loop, restart timer...
       m_autoLockTimer = Instant.now();
@@ -325,7 +326,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     // Apply chassis angular offset to the requested state.
     SwerveModuleState desiredState = new SwerveModuleState(
       state.speedMetersPerSecond,
-      state.angle.plus(m_location.offset)
+      state.angle
     );
 
     // Optimize swerve module rotation state
@@ -405,7 +406,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   public SwerveModuleState getState() {
     return new SwerveModuleState(
       getDriveVelocity(),
-      Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition).minus(m_location.offset)
+      Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition)
     );
   }
 
@@ -416,7 +417,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   public SwerveModulePosition getPosition() {
     return new SwerveModulePosition(
       m_driveMotor.getInputs().encoderPosition,
-      Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition).minus(m_location.offset)
+      Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition)
     );
   }
 
@@ -432,7 +433,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
    * Lock swerve module
    */
   public void lock() {
-    set(new SwerveModuleState(0.0, LOCK_POSITION.minus(m_location.offset)));
+    set(new SwerveModuleState(0.0, Rotation2d.fromRadians(LOCK_POSITION).minus(m_location.offset)));
   }
 
   /**
