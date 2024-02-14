@@ -768,7 +768,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
    */
   public void resetEncoder(double position) {
     m_spark.getEncoder().setPosition(position);
-    System.out.println(String.join(" ", m_id.name, "Encoder reset to "+position+"!"));
+    //System.out.println(String.join(" ", m_id.name, "Encoder reset to "+position+"!"));
   }
 
   /**
