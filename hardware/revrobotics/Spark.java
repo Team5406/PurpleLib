@@ -113,6 +113,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
   private static final String MODE_LOG_ENTRY = "/OutputMode";
   private static final String CURRENT_LOG_ENTRY = "/Current";
   private static final String MOTION_LOG_ENTRY = "/SmoothMotion";
+  private static final String MOTOR_TEMP_LOG_ENTRY = "/Motortemp";
 
 
   private CANSparkBase m_spark;
@@ -383,6 +384,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     handleSmoothMotion();
 
     Logger.recordOutput(m_id.name + CURRENT_LOG_ENTRY, m_spark.getOutputCurrent());
+    Logger.recordOutput(m_id.name + MOTOR_TEMP_LOG_ENTRY, m_spark.getMotorTemperature());
     Logger.recordOutput(m_id.name + MOTION_LOG_ENTRY, m_isSmoothMotionEnabled);
   }
 
