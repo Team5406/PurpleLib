@@ -101,6 +101,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     public double absoluteEncoderVelocity = 0.0;
     public boolean forwardLimitSwitch = false;
     public boolean reverseLimitSwitch = false;
+    public double current = 0.0;
   }
 
   private static final int PID_SLOT = 0;
@@ -279,6 +280,10 @@ public class Spark implements LoggableHardware, AutoCloseable {
     return getAnalog().getVelocity();
   }
 
+  private double getCurrent() {
+    return m_spark.getOutputCurrent();
+  }
+
   /**
    * Returns an object for interfacing with a connected absolute encoder.
    * @return An object for interfacing with a connected absolute encoder
@@ -341,6 +346,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     m_inputs.absoluteEncoderVelocity = getAbsoluteEncoderVelocity();
     m_inputs.forwardLimitSwitch = getForwardLimitSwitch().isPressed();
     m_inputs.reverseLimitSwitch = getReverseLimitSwitch().isPressed();
+    m_inputs.current = getCurrent();
 
     if (getMotorType() == MotorType.kBrushed) return;
     m_inputs.encoderPosition = getEncoderPosition();
