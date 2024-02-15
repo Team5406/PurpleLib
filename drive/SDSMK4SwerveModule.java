@@ -319,7 +319,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
    */
   public void simulationPeriodic() {
     m_driveMotor.getInputs().encoderPosition = m_simDrivePosition;
-    m_rotateMotor.getInputs().absoluteEncoderPosition = m_simRotatePosition;
+    m_rotateMotor.getInputs().encoderPosition = m_simRotatePosition;
   }
 
   /**
