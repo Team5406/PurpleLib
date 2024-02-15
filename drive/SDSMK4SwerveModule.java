@@ -110,7 +110,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private static final double DRIVE_VELOCITY_kP = 0.04;
   private static final double DRIVE_VELOCITY_TOLERANCE = 0.01;
   private static final boolean DRIVE_VELOCITY_SENSOR_PHASE = false;
-  private final boolean DRIVE_INVERT_MOTOR;
+  private static final boolean DRIVE_INVERT_MOTOR = false;
 
   // Swerve rotate PID settings
   private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(0.5, 0.0, 0.0, 0.0);
@@ -165,7 +165,6 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     DRIVE_METERS_PER_ROTATION = DRIVE_METERS_PER_TICK * encoderTicksPerRotation;
     DRIVE_MAX_LINEAR_SPEED = (GlobalConstants.NEO_MAX_RPM / 60) * DRIVE_METERS_PER_ROTATION * DRIVETRAIN_EFFICIENCY;
     DRIVE_MOTOR_CURRENT_LIMIT = (int)driveMotorCurrentLimit.in(Units.Amps);
-    DRIVE_INVERT_MOTOR = inverted;
     DRIVE_ROTATE_INVERT_MOTOR = inverted;
 
     this.m_driveMotor = swerveHardware.driveMotor;
