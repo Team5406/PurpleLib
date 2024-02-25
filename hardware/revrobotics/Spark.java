@@ -195,6 +195,26 @@ public class Spark implements LoggableHardware, AutoCloseable {
     return status;
   }
 
+    /**
+   * Attempt to apply parameter for void methods and check if specified parameter is set correctly
+   * @param parameterSetter Method to set desired parameter
+   * @param parameterCheckSupplier Method to check for parameter in question
+   * @return {@link REVLibError#kOk} if successful
+   */
+  private void applyParameter(Runnable parameterSetter, BooleanSupplier parameterCheckSupplier, String errorMessage) {
+    REVLibError status = REVLibError.kError;
+    for (int i = 0; i < MAX_ATTEMPTS; i++) {
+      parameterSetter.run();
+      if (parameterCheckSupplier.getAsBoolean()){
+        status = REVLibError.kOk;
+        break;
+      }
+      Timer.delay(APPLY_PARAMETER_WAIT_TIME);
+    }
+    checkStatus(status, errorMessage);
+
+  }
+
   /**
    * Check status and print error message if necessary
    * @param status Status to check
@@ -545,8 +565,14 @@ public class Spark implements LoggableHardware, AutoCloseable {
    *
    * @param isInverted The state of inversion, true is inverted.
    */
+
   public void setInverted(boolean isInverted) {
-    m_spark.setInverted(isInverted);
+    applyParameter(
+      () -> m_spark.setInverted(isInverted),
+      () -> m_spark.getInverted() == isInverted,
+      "Set inverted failure!"
+    );
+
   }
 
   /**
