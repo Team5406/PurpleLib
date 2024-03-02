@@ -122,12 +122,12 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private static final double DRIVE_KS = 0.299508;
   private static final double DRIVE_KV = 2.578575;
   private static final double DRIVE_KA = 0.55829;
-  private static final double ROTATE_KS = 0.33318;
-  private static final double ROTATE_KV = 2.739275;
+  private static final double ROTATE_KS = 0; //0.33318;
+  private static final double ROTATE_KV = 0.45; //2.739275;
   private static final double ROTATE_KA = 0.25819;
 
   // Swerve rotate PID settings
-  private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(1, 0.0, 0.0, 0.0); //sysid suggests a P=5;
+  private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(0, 0.0, 0.0, 0.0); //sysid suggests a P=5;
   private static final double DRIVE_ROTATE_TOLERANCE = 0.02;
   private static final double DRIVE_ROTATE_LOWER_LIMIT = 0.0;
   private static final double DRIVE_ROTATE_UPPER_LIMIT = 0.0;
@@ -138,7 +138,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private final SimpleMotorFeedforward rotateFF = new SimpleMotorFeedforward(ROTATE_KS, ROTATE_KV, ROTATE_KA);
   private final SimpleMotorFeedforward driveFF = new SimpleMotorFeedforward(DRIVE_KS, DRIVE_KV, DRIVE_KA);
   private static final Constraints TURNING_CONSTRAINTS = new TrapezoidProfile.Constraints(4, 11); //FIXME: Magic Numbers
-  private final ProfiledPIDController TURNING_PID_CONTROLLER = new ProfiledPIDController(1, 0, 0, TURNING_CONSTRAINTS); //FIXME: Magic Numbers
+  private final ProfiledPIDController TURNING_PID_CONTROLLER = new ProfiledPIDController(0, 0, 0, TURNING_CONSTRAINTS); //FIXME: Magic Numbers
 
   private Spark m_driveMotor;
   private Spark m_rotateMotor;
@@ -220,7 +220,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
         DRIVE_VELOCITY_kP,
         0.0,
         0.0,
-        1 / ((m_driveMotor.getKind().getMaxRPM() / 60) * m_driveConversionFactor)
+        0.0 //1 / ((m_driveMotor.getKind().getMaxRPM() / 60) * m_driveConversionFactor)
       ),
       DRIVE_VELOCITY_SENSOR_PHASE,
       DRIVE_INVERT_MOTOR,
@@ -376,11 +376,12 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     final double turnOutput = TURNING_PID_CONTROLLER.calculate(m_rotateMotor.getInputs().encoderPosition, desiredState.angle.getRadians());
     final double arfFFRotate = rotateFF.calculate(TURNING_PID_CONTROLLER.getSetpoint().velocity);
 
-    m_rotateMotor.set(TURNING_PID_CONTROLLER.getSetpoint().position, ControlType.kPosition, arfFFRotate, SparkPIDController.ArbFFUnits.kVoltage);
+    m_rotateMotor.set(TURNING_PID_CONTROLLER.getSetpoint().position, ControlType.kPosition, -arfFFRotate, SparkPIDController.ArbFFUnits.kVoltage);
 
     // Set drive motor speed    
     double arbFFDrive = driveFF.calculate(desiredState.speedMetersPerSecond);
-    m_driveMotor.set(desiredState.speedMetersPerSecond, ControlType.kVelocity, arbFFDrive, SparkPIDController.ArbFFUnits.kVoltage);
+    //m_driveMotor.set(desiredState.speedMetersPerSecond, ControlType.kVelocity, arbFFDrive, SparkPIDController.ArbFFUnits.kVoltage);
+    m_driveMotor.set(0.0);
 
     // Save drive and rotate position for simulation purposes only
     m_simDrivePosition += desiredState.speedMetersPerSecond * GlobalConstants.ROBOT_LOOP_PERIOD;
