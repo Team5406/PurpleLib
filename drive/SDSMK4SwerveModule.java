@@ -119,12 +119,12 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private static final double DRIVE_VELOCITY_TOLERANCE = 0.01;
   private static final boolean DRIVE_VELOCITY_SENSOR_PHASE = false;
   private static final boolean DRIVE_INVERT_MOTOR = false;
-  private static final double DRIVE_KS = 0.300;
-  private static final double DRIVE_KV = 2.72;
-  private static final double DRIVE_KA = 0.320;
-  private static final double ROTATE_KS = 0.333;
-  private static final double ROTATE_KV = 2.74;
-  private static final double ROTATE_KA = 0.258;
+  private static final double DRIVE_KS = 0.299508;
+  private static final double DRIVE_KV = 2.578575;
+  private static final double DRIVE_KA = 0.55829;
+  private static final double ROTATE_KS = 0.33318;
+  private static final double ROTATE_KV = 2.739275;
+  private static final double ROTATE_KA = 0.25819;
 
   // Swerve rotate PID settings
   private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(1, 0.0, 0.0, 0.0); //sysid suggests a P=5;
