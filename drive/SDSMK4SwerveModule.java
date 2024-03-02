@@ -22,12 +22,14 @@ import com.revrobotics.SparkPIDController;
 
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.ArmFeedforward;
+import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
+import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
 import edu.wpi.first.units.Angle;
 import edu.wpi.first.units.Current;
 import edu.wpi.first.units.Distance;
@@ -117,16 +119,15 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private static final double DRIVE_VELOCITY_TOLERANCE = 0.01;
   private static final boolean DRIVE_VELOCITY_SENSOR_PHASE = false;
   private static final boolean DRIVE_INVERT_MOTOR = false;
-  private static final double DRIVE_KS = 0;
-  private static final double DRIVE_KV = 0;
-  private static final double DRIVE_KA = 0;
-  private static final double ROTATE_KS = 0;
-  private static final double ROTATE_KV = 0;
-  private static final double ROTATE_KA = 0;
-  private static final double ROTATE_KD = 0;
+  private static final double DRIVE_KS = 0.300;
+  private static final double DRIVE_KV = 2.72;
+  private static final double DRIVE_KA = 0.320;
+  private static final double ROTATE_KS = 0.333;
+  private static final double ROTATE_KV = 2.74;
+  private static final double ROTATE_KA = 0.258;
 
   // Swerve rotate PID settings
-  private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(0.5, 0.0, 0.0, 0.0);
+  private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(1, 0.0, 0.0, 0.0); //sysid suggests a P=5;
   private static final double DRIVE_ROTATE_TOLERANCE = 0.02;
   private static final double DRIVE_ROTATE_LOWER_LIMIT = 0.0;
   private static final double DRIVE_ROTATE_UPPER_LIMIT = 0.0;
@@ -134,13 +135,10 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private static final boolean DRIVE_ROTATE_SENSOR_PHASE = false;
   private final boolean DRIVE_ROTATE_INVERT_MOTOR;
 
-  SimpleMotorFeedforward rotateFF = new SimpleMotorFeedforward(ROTATE_KS, ROTATE_KV, ROTATE_KA);
-
-  SimpleMotorFeedforward DriveFF = new SimpleMotorFeedforward(DRIVE_KS, DRIVE_KV, DRIVE_KA);
-
-  private final TrapezoidProfile m_profile = new TrapezoidProfile(new TrapezoidProfile.Constraints(1.75, 0.75));
-  private TrapezoidProfile.State m_goal = new TrapezoidProfile.State();
-  private TrapezoidProfile.State m_setpoint = new TrapezoidProfile.State();
+  private final SimpleMotorFeedforward rotateFF = new SimpleMotorFeedforward(ROTATE_KS, ROTATE_KV, ROTATE_KA);
+  private final SimpleMotorFeedforward driveFF = new SimpleMotorFeedforward(DRIVE_KS, DRIVE_KV, DRIVE_KA);
+  private static final Constraints TURNING_CONSTRAINTS = new TrapezoidProfile.Constraints(4, 11); //FIXME: Magic Numbers
+  private final ProfiledPIDController TURNING_PID_CONTROLLER = new ProfiledPIDController(1, 0, 0, TURNING_CONSTRAINTS); //FIXME: Magic Numbers
 
   private Spark m_driveMotor;
   private Spark m_rotateMotor;
@@ -213,6 +211,8 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
     // Enable PID wrapping
     m_rotateMotor.enablePIDWrapping(-Math.PI, +Math.PI);
+    TURNING_PID_CONTROLLER.enableContinuousInput(-Math.PI, +Math.PI);
+
 
     // Create PID configs
     SparkPIDConfig driveMotorConfig = new SparkPIDConfig(
@@ -368,19 +368,18 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
     // Optimize swerve module rotation state
     // Rotate motor returns an angle in radians
-    desiredState = SwerveModuleState.optimize(desiredState, Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition));
+    Rotation2d encoderPosition = Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition);
+    desiredState = SwerveModuleState.optimize(desiredState, encoderPosition);
+    desiredState.speedMetersPerSecond *= desiredState.angle.minus(encoderPosition).getCos();
 
     // Set rotate motor position
-    double angle = desiredState.angle.getRadians();
-    m_goal = new TrapezoidProfile.State(angle, 0);
-    m_setpoint = m_profile.calculate(2, m_setpoint, m_goal);
-    double arbFF = rotateFF.calculate(m_setpoint.velocity);
+    final double turnOutput = TURNING_PID_CONTROLLER.calculate(m_rotateMotor.getInputs().encoderPosition, desiredState.angle.getRadians());
+    final double arfFFRotate = rotateFF.calculate(TURNING_PID_CONTROLLER.getSetpoint().velocity);
 
-    m_rotateMotor.set(m_setpoint.position, ControlType.kPosition, arbFF, SparkPIDController.ArbFFUnits.kVoltage);
+    m_rotateMotor.set(TURNING_PID_CONTROLLER.getSetpoint().position, ControlType.kPosition, arfFFRotate, SparkPIDController.ArbFFUnits.kVoltage);
 
     // Set drive motor speed    
-    double arbFFDrive = DriveFF.calculate(desiredState.speedMetersPerSecond);
-
+    double arbFFDrive = driveFF.calculate(desiredState.speedMetersPerSecond);
     m_driveMotor.set(desiredState.speedMetersPerSecond, ControlType.kVelocity, arbFFDrive, SparkPIDController.ArbFFUnits.kVoltage);
 
     // Save drive and rotate position for simulation purposes only
