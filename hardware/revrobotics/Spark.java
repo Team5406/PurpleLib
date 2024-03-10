@@ -581,6 +581,38 @@ public class Spark implements LoggableHardware, AutoCloseable {
 
   }
 
+  public void smartMotionMaxVelocity(double maxVel) {
+    applyParameter(
+      () -> m_spark.getPIDController().setSmartMotionMaxVelocity(maxVel, PID_SLOT),
+      () -> m_spark.getPIDController().getSmartMotionMaxVelocity(PID_SLOT) == maxVel,
+      "Set smart motion max velocity error!"
+    );
+  }
+
+  public void smartMotionMinVelocity(double minVel) {
+    applyParameter(
+      () -> m_spark.getPIDController().setSmartMotionMinOutputVelocity(minVel, PID_SLOT),
+      () -> m_spark.getPIDController().getSmartMotionMinOutputVelocity(PID_SLOT) == minVel,
+      "Set smart motion max velocity error!"
+    );
+  }
+
+  public void smartMotionMaxAcceleration(double maxAccel) {
+    applyParameter(
+      () -> m_spark.getPIDController().setSmartMotionMaxAccel(maxAccel, PID_SLOT),
+      () -> m_spark.getPIDController().getSmartMotionMaxAccel(PID_SLOT) == maxAccel,
+      "Set smart motion max velocity error!"
+    );
+  }
+
+  public void smartMotionClosedLoop(double closedLoop) {
+    applyParameter(
+      () -> m_spark.getPIDController().setSmartMotionAllowedClosedLoopError(closedLoop, PID_SLOT),
+      () -> m_spark.getPIDController().getSmartMotionAllowedClosedLoopError(PID_SLOT) == closedLoop,
+      "Set smart motion max velocity error!"
+    );
+  }
+
   /**
    * Set motor output duty cycle
    * @param value Value to set [-1.0, +1.0]
