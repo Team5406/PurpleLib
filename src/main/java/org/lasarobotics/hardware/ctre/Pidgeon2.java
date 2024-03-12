@@ -22,13 +22,6 @@ import edu.wpi.first.units.Velocity;
 
 /** CTRE Pidgeon 2.0 */
 public class Pidgeon2 implements LoggableHardware, AutoCloseable {
-  /** Pigeon Status Frame */
-  public enum PigeonStatusFrame {
-    PITCH,
-    YAW,
-    ROLL
-  }
-
   /** Pidgeon ID */
   public static class ID {
     public final String name;
@@ -46,6 +39,13 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
       this.bus = bus;
       this.deviceID = deviceID;
     }
+  }
+
+  /** Pigeon Status Frame */
+  public enum PigeonStatusFrame {
+    PITCH,
+    YAW,
+    ROLL
   }
 
   /**
@@ -68,6 +68,9 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
   public Pidgeon2(ID id) {
     this.m_id = id;
     this.m_pidgeon = new Pigeon2(id.deviceID, id.bus.name);
+    this.m_inputs = new Pidgeon2InputsAutoLogged();
+
+    periodic();
   }
 
   /**
