@@ -200,7 +200,8 @@ public class SDSMK4SwerveModule implements AutoCloseable {
         DRIVE_VELOCITY_kP,
         0.0,
         0.0,
-        1 / ((m_driveMotor.getKind().getMaxRPM() / 60) * m_driveConversionFactor)
+        1 / ((m_driveMotor.getKind().getMaxRPM() / 60) * m_driveConversionFactor),
+        0.0
       ),
       DRIVE_VELOCITY_SENSOR_PHASE,
       DRIVE_INVERT_MOTOR,
