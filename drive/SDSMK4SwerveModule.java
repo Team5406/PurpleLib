@@ -93,8 +93,8 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   }
 
   private final double EPSILON = 5e-3;
-  private final int DRIVE_MOTOR_CURRENT_LIMIT;
-  private final int ROTATE_MOTOR_CURRENT_LIMIT = Units.Amps.of(30.0);
+  private final Measure<Current> DRIVE_MOTOR_CURRENT_LIMIT;
+  private final Measure<Current> ROTATE_MOTOR_CURRENT_LIMIT = Units.Amps.of(30.0);
   private final double MK4_ROTATE_RATIO = 12.8;
   private final double MK4I_ROTATE_RATIO = 150.0 / 7.0;
   private final Rotation2d LOCK_POSITION = Rotation2d.fromRadians(Math.PI / 4);
@@ -114,7 +114,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private static final boolean DRIVE_INVERT_MOTOR = false;
 
   // Swerve rotate PID settings
-  private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(0.5, 0.0, 0.0, 0.0);
+  private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(0.5, 0.0, 0.0, 0.0, 0.0);
   private static final double DRIVE_ROTATE_TOLERANCE = 0.02;
   private static final double DRIVE_ROTATE_LOWER_LIMIT = 0.0;
   private static final double DRIVE_ROTATE_UPPER_LIMIT = 0.0;
