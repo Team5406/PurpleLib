@@ -106,6 +106,10 @@ public class Spark implements LoggableHardware, AutoCloseable {
 
   private static final int PID_SLOT = 0;
   private static final int MAX_ATTEMPTS = 5;
+  private static final int SPARK_MAX_MEASUREMENT_PERIOD = 16;
+  private static final int SPARK_FLEX_MEASUREMENT_PERIOD = 32;
+  private static final int SPARK_MAX_AVERAGE_DEPTH = 2;
+  private static final int SPARK_FLEX_AVERAGE_DEPTH = 8;
   private static final double MAX_VOLTAGE = 12.0;
   private static final double BURN_FLASH_WAIT_TIME = 0.5;
   private static final double APPLY_PARAMETER_WAIT_TIME = 0.1;
@@ -152,7 +156,6 @@ public class Spark implements LoggableHardware, AutoCloseable {
     this.m_kind = kind;
     this.m_inputs = new SparkInputsAutoLogged();
     this.m_isSmoothMotionEnabled = false;
-
     m_spark.restoreFactoryDefaults();
     m_spark.enableVoltageCompensation(MAX_VOLTAGE);
   }
@@ -334,6 +337,41 @@ public class Spark implements LoggableHardware, AutoCloseable {
    */
   private SparkLimitSwitch getReverseLimitSwitch() {
     return m_spark.getReverseLimitSwitch(m_limitSwitchType);
+  }
+
+   /**
+   * Set encoder velocity measurement period
+   * <p>
+   * Sets to {@value Spark#SPARK_MAX_MEASUREMENT_PERIOD} for Spark Max, {@value Spark#SPARK_FLEX_MEASUREMENT_PERIOD} for Spark Flex
+   * @return {@link REVLibError#kOk} if successful
+   */
+  public REVLibError setMeasurementPeriod() {
+    REVLibError status;
+    int period = getKind().equals(MotorKind.NEO_VORTEX) ? SPARK_FLEX_MEASUREMENT_PERIOD : SPARK_MAX_MEASUREMENT_PERIOD;
+    status = applyParameter(
+      () -> m_spark.getEncoder().setMeasurementPeriod(period),
+      () -> m_spark.getEncoder().getMeasurementPeriod() == period,
+      "Set encoder measurement period failure!"
+    );
+    return status;
+  }
+
+
+    /**
+   * Set encoder velocity measurement average depth
+   * <p>
+   * Sets to {@value Spark#SPARK_MAX_AVERAGE_DEPTH} for Spark Max, {@value Spark#SPARK_FLEX_AVERAGE_DEPTH} for Spark Flex
+   * @return {@link REVLibError#kOk} if successful
+   */
+  public REVLibError setAverageDepth() {
+    REVLibError status;
+    int averageDepth = getKind().equals(MotorKind.NEO_VORTEX) ? SPARK_FLEX_AVERAGE_DEPTH : SPARK_MAX_AVERAGE_DEPTH;
+    status = applyParameter(
+      () -> m_spark.getEncoder().setAverageDepth(averageDepth),
+      () -> m_spark.getEncoder().getAverageDepth() == averageDepth,
+      "Set encoder average depth failure!"
+    );
+    return status;
   }
 
   /**
@@ -581,36 +619,44 @@ public class Spark implements LoggableHardware, AutoCloseable {
 
   }
 
-  public void smartMotionMaxVelocity(double maxVel) {
-    applyParameter(
+  public REVLibError setSmartMotionMaxVelocity(double maxVel) {
+    REVLibError status;
+    status = applyParameter(
       () -> m_spark.getPIDController().setSmartMotionMaxVelocity(maxVel, PID_SLOT),
       () -> m_spark.getPIDController().getSmartMotionMaxVelocity(PID_SLOT) == maxVel,
       "Set smart motion max velocity error!"
     );
+    return status;
   }
 
-  public void smartMotionMinVelocity(double minVel) {
-    applyParameter(
+  public REVLibError setSmartMotionMinOutputVelocity(double minVel) {
+    REVLibError status;
+    status = applyParameter(
       () -> m_spark.getPIDController().setSmartMotionMinOutputVelocity(minVel, PID_SLOT),
       () -> m_spark.getPIDController().getSmartMotionMinOutputVelocity(PID_SLOT) == minVel,
-      "Set smart motion max velocity error!"
+      "Set smart motion min output error!"
     );
+    return status;
   }
 
-  public void smartMotionMaxAcceleration(double maxAccel) {
-    applyParameter(
+  public REVLibError setSmartMotionMaxAccel(double maxAccel) {
+    REVLibError status;
+    status = applyParameter(
       () -> m_spark.getPIDController().setSmartMotionMaxAccel(maxAccel, PID_SLOT),
       () -> m_spark.getPIDController().getSmartMotionMaxAccel(PID_SLOT) == maxAccel,
-      "Set smart motion max velocity error!"
+      "Set smart motion max acceleration!"
     );
+    return status;
   }
 
-  public void smartMotionClosedLoop(double closedLoop) {
-    applyParameter(
+  public REVLibError setSmartMotionAllowedClosedLoopError(double closedLoop) {
+    REVLibError status;
+    status = applyParameter(
       () -> m_spark.getPIDController().setSmartMotionAllowedClosedLoopError(closedLoop, PID_SLOT),
       () -> m_spark.getPIDController().getSmartMotionAllowedClosedLoopError(PID_SLOT) == closedLoop,
-      "Set smart motion max velocity error!"
+      "Set smart motion allowed closed loop error!"
     );
+    return status;
   }
 
   /**
