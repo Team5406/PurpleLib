@@ -9,6 +9,8 @@ import org.littletonrobotics.junction.AutoLog;
 import org.littletonrobotics.junction.Logger;
 
 import com.ctre.phoenix.ErrorCode;
+import org.littletonrobotics.junction.inputs.LoggableInputs;
+
 import com.ctre.phoenix.motorcontrol.ControlMode;
 import com.ctre.phoenix.motorcontrol.FeedbackDevice;
 import com.ctre.phoenix.motorcontrol.LimitSwitchNormal;
@@ -142,7 +144,7 @@ public class TalonSRX implements LoggableHardware, AutoCloseable {
   public void initializeTalonPID(TalonPIDConfig config, FeedbackDevice feedbackDevice,
                                  boolean forwardLimitSwitch, boolean reverseLimitSwitch) {
     m_config = config;
-
+    
     // Reset Talon to default
     m_talon.configFactoryDefault();
 

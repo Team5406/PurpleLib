@@ -7,12 +7,14 @@ package org.lasarobotics.drive;
 import java.time.Duration;
 import java.time.Instant;
 
+import org.lasarobotics.hardware.ctre.CANCoder;
 import org.lasarobotics.hardware.revrobotics.Spark;
 import org.lasarobotics.hardware.revrobotics.Spark.MotorKind;
 import org.lasarobotics.hardware.revrobotics.SparkPIDConfig;
 import org.lasarobotics.utils.GlobalConstants;
 import org.lasarobotics.utils.PIDConstants;
 
+import com.ctre.phoenix6.signals.SensorDirectionValue;
 import com.revrobotics.CANSparkBase.ControlType;
 import com.revrobotics.CANSparkBase.IdleMode;
 
@@ -23,33 +25,43 @@ import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.units.Angle;
+import edu.wpi.first.units.Current;
 import edu.wpi.first.units.Distance;
 import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Time;
 import edu.wpi.first.units.Units;
 import edu.wpi.first.units.Velocity;
 
-/** REV MAXSwerve module */
+/** SDSMK4 module */
 public class SDSMK4SwerveModule implements AutoCloseable {
   /**
-   * MAXSwerve module hardware
+   * SDSMK4 module hardware
    */
   public static class Hardware {
     private Spark driveMotor;
     private Spark rotateMotor;
+    private CANCoder absoluteEncoder;
 
-    public Hardware(Spark driveMotor, Spark rotateMotor) {
+    public Hardware(Spark driveMotor, Spark rotateMotor, CANCoder absoluteEncoder) {
       this.driveMotor = driveMotor;
       this.rotateMotor = rotateMotor;
+      this.absoluteEncoder = absoluteEncoder;
     }
+  }
+
+  public static class ModuleConfig {
+    private GearRatio gearRatio;
+    private boolean inverted;
+
+
   }
 
   /** Module location */
   public enum ModuleLocation {
-    LeftFront(0, Rotation2d.fromRadians(-Math.PI / 2)),
+    LeftFront(0, Rotation2d.fromRadians(+0.0)),
     RightFront(1, Rotation2d.fromRadians(+0.0)),
-    LeftRear(2, Rotation2d.fromRadians(+Math.PI)),
-    RightRear(3, Rotation2d.fromRadians(+Math.PI / 2));
+    LeftRear(2, Rotation2d.fromRadians(+0.0)),
+    RightRear(3, Rotation2d.fromRadians(+0.0));
 
     /** Module index */
     public final int index;
@@ -81,11 +93,13 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   }
 
   private final double EPSILON = 5e-3;
-  private final int DRIVE_MOTOR_CURRENT_LIMIT = 50;
-  private final int ROTATE_MOTOR_CURRENT_LIMIT = 30;
+  private final int DRIVE_MOTOR_CURRENT_LIMIT;
+  private final int ROTATE_MOTOR_CURRENT_LIMIT = Units.Amps.of(30.0);
+  private final double MK4_ROTATE_RATIO = 12.8;
+  private final double MK4I_ROTATE_RATIO = 150.0 / 7.0;
   private final Rotation2d LOCK_POSITION = Rotation2d.fromRadians(Math.PI / 4);
 
-  private static final double DRIVE_WHEEL_DIAMETER_METERS = Units.Inches.of(3).in(Units.Meters); // 4" wheels
+  private static final double DRIVE_WHEEL_DIAMETER_METERS = Units.Inches.of(4).in(Units.Meters); // 4" wheels
   private static final double DRIVETRAIN_EFFICIENCY = 0.90;
   private static final double MAX_AUTO_LOCK_TIME = 10.0;
   private final double DRIVE_TICKS_PER_METER;
@@ -100,16 +114,17 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private static final boolean DRIVE_INVERT_MOTOR = false;
 
   // Swerve rotate PID settings
-  private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(1.0, 0.0, 0.0, 0.0);
-  private static final double DRIVE_ROTATE_TOLERANCE = 0.01;
+  private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(0.5, 0.0, 0.0, 0.0);
+  private static final double DRIVE_ROTATE_TOLERANCE = 0.02;
   private static final double DRIVE_ROTATE_LOWER_LIMIT = 0.0;
   private static final double DRIVE_ROTATE_UPPER_LIMIT = 0.0;
   private static final boolean DRIVE_ROTATE_SOFT_LIMITS = false;
-  private static final boolean DRIVE_ROTATE_SENSOR_PHASE = true;
-  private static final boolean DRIVE_ROTATE_INVERT_MOTOR = false;
+  private static final boolean DRIVE_ROTATE_SENSOR_PHASE = false;
+  private final boolean DRIVE_ROTATE_INVERT_MOTOR;
 
   private Spark m_driveMotor;
   private Spark m_rotateMotor;
+  private CANCoder m_absoluteEncoder;
   private Translation2d m_moduleCoordinate;
   private ModuleLocation m_location;
   private Rotation2d m_previousRotatePosition;
@@ -125,26 +140,37 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
   private TractionControlController m_tractionControlController;
   private Instant m_autoLockTimer;
+  private int m_moduleSynchronizationCounter = 0;
 
   /**
-   * Create an instance of a MAXSwerveModule
+   * Create an instance of a SDSM4SwerveModule
    * @param swerveHardware Hardware devices required by swerve module
    * @param location Location of module
    * @param driveGearRatio Gear ratio for driving wheel
    * @param wheelbase Robot wheelbase
    * @param trackWidth Robot track width
    * @param autoLockTime Time before rotating module to locked position [0.0, 10.0]
-   * @param slipRatio Desired slip ratio
+   * @param maxSlippingTime Maximum time that wheel is allowed to slip
+   * @param driveMotorCurrentLimit Desired current limit for the drive motor
+   * @param inverted True if motors are mounted upside down, MK4i
+   * @param slipRatio Desired slip ratio [+0.01, +0.40]
    */
   public SDSMK4SwerveModule(Hardware swerveHardware, ModuleLocation location, GearRatio driveGearRatio,
-                         Measure<Distance> wheelbase, Measure<Distance> trackWidth, Measure<Time> autoLockTime, double slipRatio) {
-    DRIVE_TICKS_PER_METER = (GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION * driveGearRatio.value) * (1 / (DRIVE_WHEEL_DIAMETER_METERS * Math.PI));
+                            Measure<Distance> wheelbase, Measure<Distance> trackWidth, Measure<Time> autoLockTime,
+                            Measure<Time> maxSlippingTime, Measure<Current> driveMotorCurrentLimit, boolean inverted, double slipRatio) {
+    int encoderTicksPerRotation = swerveHardware.driveMotor.getKind().equals(MotorKind.NEO)
+      ? GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION
+      : GlobalConstants.VORTEX_ENCODER_TICKS_PER_ROTATION;
+    DRIVE_TICKS_PER_METER = (encoderTicksPerRotation * driveGearRatio.value) * (1 / (DRIVE_WHEEL_DIAMETER_METERS * Math.PI));
     DRIVE_METERS_PER_TICK = 1 / DRIVE_TICKS_PER_METER;
-    DRIVE_METERS_PER_ROTATION = DRIVE_METERS_PER_TICK * GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION;
+    DRIVE_METERS_PER_ROTATION = DRIVE_METERS_PER_TICK * encoderTicksPerRotation;
     DRIVE_MAX_LINEAR_SPEED = (GlobalConstants.NEO_MAX_RPM / 60) * DRIVE_METERS_PER_ROTATION * DRIVETRAIN_EFFICIENCY;
+    DRIVE_MOTOR_CURRENT_LIMIT = (int)driveMotorCurrentLimit.in(Units.Amps);
+    DRIVE_ROTATE_INVERT_MOTOR = inverted;
 
     this.m_driveMotor = swerveHardware.driveMotor;
     this.m_rotateMotor = swerveHardware.rotateMotor;
+    this.m_absoluteEncoder = swerveHardware.absoluteEncoder;
     this.m_location = location;
     this.m_driveGearRatio = driveGearRatio;
     this.m_autoLock = true;
@@ -152,7 +178,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     this.m_simRotatePosition = 0.0;
     this.m_autoLockTime = MathUtil.clamp(autoLockTime.in(Units.Milliseconds), 0.0, MAX_AUTO_LOCK_TIME * 1000);
     this.m_previousRotatePosition = LOCK_POSITION;
-    this.m_tractionControlController =  new TractionControlController(Units.MetersPerSecond.of(DRIVE_MAX_LINEAR_SPEED), slipRatio);
+    this.m_tractionControlController =  new TractionControlController(Units.MetersPerSecond.of(DRIVE_MAX_LINEAR_SPEED), maxSlippingTime, slipRatio);
     this.m_autoLockTimer = Instant.now();
 
     // Set drive encoder conversion factor
@@ -161,12 +187,12 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     m_driveMotor.setVelocityConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_driveConversionFactor / 60);
 
     // Set rotate encoder conversion factor
-    m_rotateConversionFactor = 2 * Math.PI;
-    m_rotateMotor.setPositionConversionFactor(Spark.FeedbackSensor.THROUGH_BORE_ENCODER, m_rotateConversionFactor);
-    m_rotateMotor.setVelocityConversionFactor(Spark.FeedbackSensor.THROUGH_BORE_ENCODER, m_rotateConversionFactor / 60);
+    m_rotateConversionFactor = (2 * Math.PI) / (inverted ? MK4I_ROTATE_RATIO : MK4_ROTATE_RATIO);
+    m_rotateMotor.setPositionConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_rotateConversionFactor);
+    m_rotateMotor.setVelocityConversionFactor(Spark.FeedbackSensor.NEO_ENCODER, m_rotateConversionFactor / 60);
 
     // Enable PID wrapping
-    m_rotateMotor.enablePIDWrapping(0.0, m_rotateConversionFactor);
+    m_rotateMotor.enablePIDWrapping(-Math.PI, +Math.PI);
 
     // Create PID configs
     SparkPIDConfig driveMotorConfig = new SparkPIDConfig(
@@ -192,8 +218,13 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
     // Initialize PID
     m_driveMotor.initializeSparkPID(driveMotorConfig, Spark.FeedbackSensor.NEO_ENCODER);
-    m_rotateMotor.initializeSparkPID(rotateMotorConfig, Spark.FeedbackSensor.THROUGH_BORE_ENCODER);
+    m_rotateMotor.initializeSparkPID(rotateMotorConfig, Spark.FeedbackSensor.NEO_ENCODER);
 
+    m_driveMotor.setMeasurementPeriod();
+    m_driveMotor.setAverageDepth();
+    m_rotateMotor.setMeasurementPeriod();
+    m_rotateMotor.setAverageDepth();
+    
     // Set drive motor to coast
     m_driveMotor.setIdleMode(IdleMode.kCoast);
 
@@ -206,10 +237,12 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
     // Reset encoder
     resetDriveEncoder();
+    m_absoluteEncoder.configFactoryDefault(false);
+    m_absoluteEncoder.configSensorDirection(SensorDirectionValue.CounterClockwise_Positive);
 
-    // Add motors to REVPhysicsSim
-    m_driveMotor.addToSimulation(DCMotor.getNEO(1));
-    m_rotateMotor.addToSimulation(DCMotor.getNeo550(1));
+
+    m_absoluteEncoder.periodic();
+    m_rotateMotor.resetEncoder(m_absoluteEncoder.getInputs().absolutePosition);
 
     // Calculate module coordinate
     switch (location) {
@@ -239,19 +272,23 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   }
 
   /**
-   * Initialize hardware devices for MAXSwerve module
+   * Initialize hardware devices for SDSMK4 Swerve module
    * @param driveMotorID Drive motor ID
    * @param rotateMotorID Rotate motor ID
    * @param driveMotorKind Kind of drive motor
    * @return Hardware object containing all necessary objects for a MAXSwerve module
    * @throws IllegalArgumentException If specified drive motor is not supported
    */
-  public static Hardware initializeHardware(Spark.ID driveMotorID, Spark.ID rotateMotorID, MotorKind driveMotorKind) {
+  public static Hardware initializeHardware(Spark.ID driveMotorID, Spark.ID rotateMotorID, MotorKind driveMotorKind, MotorKind rotateMotorKind, CANCoder.ID absoluteEncoderID) {
     if (driveMotorKind != MotorKind.NEO && driveMotorKind != MotorKind.NEO_VORTEX)
       throw new IllegalArgumentException("Drive motor MUST be a NEO or a NEO Vortex!");
+    if (rotateMotorKind != MotorKind.NEO && rotateMotorKind != MotorKind.NEO_VORTEX)
+      throw new IllegalArgumentException("Rotate motor MUST be a NEO or a NEO Vortex!");
+
     Hardware swerveModuleHardware = new Hardware(
       new Spark(driveMotorID, driveMotorKind),
-      new Spark(rotateMotorID, MotorKind.NEO_550)
+      new Spark(rotateMotorID, rotateMotorKind),
+      new CANCoder(absoluteEncoderID)
     );
 
     return swerveModuleHardware;
@@ -273,14 +310,21 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   public void periodic() {
     m_driveMotor.periodic();
     m_rotateMotor.periodic();
+    m_absoluteEncoder.periodic();
+
+    if (Math.abs(getRotationVelocity().magnitude()) <= EPSILON && ++m_moduleSynchronizationCounter > 5) {
+      m_rotateMotor.resetEncoder(m_absoluteEncoder.getInputs().absolutePosition);
+      m_moduleSynchronizationCounter = 0;
+    }
   }
+
 
   /**
    * Call this method periodically during simulation
    */
   public void simulationPeriodic() {
     m_driveMotor.getInputs().encoderPosition = m_simDrivePosition;
-    m_rotateMotor.getInputs().absoluteEncoderPosition = m_simRotatePosition;
+    m_rotateMotor.getInputs().encoderPosition = m_simRotatePosition;
   }
 
   /**
@@ -308,8 +352,8 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     );
 
     // Optimize swerve module rotation state
-    // REV encoder returns an angle in radians
-    desiredState = SwerveModuleState.optimize(desiredState, Rotation2d.fromRadians(m_rotateMotor.getInputs().absoluteEncoderPosition));
+    // Rotate motor returns an angle in radians
+    desiredState = SwerveModuleState.optimize(desiredState, Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition));
 
     // Set rotate motor position
     m_rotateMotor.set(desiredState.angle.getRadians(), ControlType.kPosition);
@@ -370,13 +414,21 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   }
 
   /**
+   * Get velocity of rotation motor
+   * @return velocity of rotation motor in rad/s
+   */
+  public Measure<Velocity<Angle>> getRotationVelocity() {
+    return Units.RadiansPerSecond.of(m_rotateMotor.getInputs().encoderVelocity);
+  }
+
+  /**
    * Get current module state
    * @return Current module state
    */
   public SwerveModuleState getState() {
     return new SwerveModuleState(
       getDriveVelocity(),
-      Rotation2d.fromRadians(m_rotateMotor.getInputs().absoluteEncoderPosition).minus(m_location.offset)
+      Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition).minus(m_location.offset)
     );
   }
 
@@ -387,7 +439,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   public SwerveModulePosition getPosition() {
     return new SwerveModulePosition(
       m_driveMotor.getInputs().encoderPosition,
-      Rotation2d.fromRadians(m_rotateMotor.getInputs().absoluteEncoderPosition).minus(m_location.offset)
+      Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition).minus(m_location.offset)
     );
   }
 
@@ -460,14 +512,6 @@ public class SDSMK4SwerveModule implements AutoCloseable {
    */
   public Translation2d getModuleCoordinate() {
     return m_moduleCoordinate;
-  }
-
-  /**
-   * Get drive gear ratio
-   * @return Gear ratio for driving wheel
-   */
-  public GearRatio getDriveGearRatio() {
-    return m_driveGearRatio;
   }
 
   /**

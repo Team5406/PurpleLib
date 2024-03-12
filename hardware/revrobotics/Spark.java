@@ -106,6 +106,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     public double absoluteEncoderVelocity = 0.0;
     public boolean forwardLimitSwitch = false;
     public boolean reverseLimitSwitch = false;
+    public double current = 0.0;
   }
 
   private static final int CAN_TIMEOUT_MS = 50;
@@ -125,6 +126,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
   private static final String CURRENT_LOG_ENTRY = "/Current";
   private static final String TEMPERATURE_LOG_ENTRY = "/Temperature";
   private static final String MOTION_LOG_ENTRY = "/SmoothMotion";
+  private static final String MOTOR_TEMP_LOG_ENTRY = "/Motortemp";
 
 
   private CANSparkBase m_spark;
@@ -250,6 +252,26 @@ public class Spark implements LoggableHardware, AutoCloseable {
     return status;
   }
 
+    /**
+   * Attempt to apply parameter for void methods and check if specified parameter is set correctly
+   * @param parameterSetter Method to set desired parameter
+   * @param parameterCheckSupplier Method to check for parameter in question
+   * @return {@link REVLibError#kOk} if successful
+   */
+  private void applyParameter(Runnable parameterSetter, BooleanSupplier parameterCheckSupplier, String errorMessage) {
+    REVLibError status = REVLibError.kError;
+    for (int i = 0; i < MAX_ATTEMPTS; i++) {
+      parameterSetter.run();
+      if (parameterCheckSupplier.getAsBoolean()){
+        status = REVLibError.kOk;
+        break;
+      }
+      Timer.delay(APPLY_PARAMETER_WAIT_TIME);
+    }
+    checkStatus(status, errorMessage);
+
+  }
+
   /**
    * Attempt to apply parameter and check if specified parameter is set correctly, for void setters
    * @param parameterSetter Method to set desired parameter
@@ -290,15 +312,12 @@ public class Spark implements LoggableHardware, AutoCloseable {
 
   /**
    * Returns an object for interfacing with the built-in encoder
-   * @return
    */
   private RelativeEncoder getEncoder() {
     return m_encoder;
   }
 
   /**
-   * Get the position of the motor encoder. This returns the native units of 'rotations' by default, and can
-   * be changed by a scale factor using setPositionConversionFactor().
    * @return Number of rotations of the motor
    */
   private double getEncoderPosition() {
@@ -338,6 +357,10 @@ public class Spark implements LoggableHardware, AutoCloseable {
    */
   private double getAnalogVelocity() {
     return getAnalog().getVelocity();
+  }
+
+  private double getCurrent() {
+    return m_spark.getOutputCurrent();
   }
 
   /**
@@ -392,6 +415,41 @@ public class Spark implements LoggableHardware, AutoCloseable {
     return m_spark.getReverseLimitSwitch(m_limitSwitchType);
   }
 
+   /**
+   * Set encoder velocity measurement period
+   * <p>
+   * Sets to {@value Spark#SPARK_MAX_MEASUREMENT_PERIOD} for Spark Max, {@value Spark#SPARK_FLEX_MEASUREMENT_PERIOD} for Spark Flex
+   * @return {@link REVLibError#kOk} if successful
+   */
+  public REVLibError setMeasurementPeriod() {
+    REVLibError status;
+    int period = getKind().equals(MotorKind.NEO_VORTEX) ? SPARK_FLEX_MEASUREMENT_PERIOD : SPARK_MAX_MEASUREMENT_PERIOD;
+    status = applyParameter(
+      () -> m_spark.getEncoder().setMeasurementPeriod(period),
+      () -> m_spark.getEncoder().getMeasurementPeriod() == period,
+      "Set encoder measurement period failure!"
+    );
+    return status;
+  }
+
+
+    /**
+   * Set encoder velocity measurement average depth
+   * <p>
+   * Sets to {@value Spark#SPARK_MAX_AVERAGE_DEPTH} for Spark Max, {@value Spark#SPARK_FLEX_AVERAGE_DEPTH} for Spark Flex
+   * @return {@link REVLibError#kOk} if successful
+   */
+  public REVLibError setAverageDepth() {
+    REVLibError status;
+    int averageDepth = getKind().equals(MotorKind.NEO_VORTEX) ? SPARK_FLEX_AVERAGE_DEPTH : SPARK_MAX_AVERAGE_DEPTH;
+    status = applyParameter(
+      () -> m_spark.getEncoder().setAverageDepth(averageDepth),
+      () -> m_spark.getEncoder().getAverageDepth() == averageDepth,
+      "Set encoder average depth failure!"
+    );
+    return status;
+  }
+
   /**
    * Set encoder velocity measurement period
    * <p>
@@ -436,6 +494,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     m_inputs.absoluteEncoderVelocity = getAbsoluteEncoderVelocity();
     m_inputs.forwardLimitSwitch = getForwardLimitSwitch().isPressed();
     m_inputs.reverseLimitSwitch = getReverseLimitSwitch().isPressed();
+    m_inputs.current = getCurrent();
 
     if (getMotorType() == MotorType.kBrushed) return;
     m_inputs.encoderPosition = getEncoderPosition();
@@ -660,17 +719,58 @@ public class Spark implements LoggableHardware, AutoCloseable {
    *
    * @param isInverted The state of inversion, true is inverted.
    */
+
   public void setInverted(boolean isInverted) {
     applyParameter(
       () -> m_spark.setInverted(isInverted),
       () -> m_spark.getInverted() == isInverted,
       "Set motor inverted failure!"
     );
+      "Set inverted failure!"
+
+  }
+  public REVLibError setSmartMotionMaxVelocity(double maxVel) {
+    REVLibError status;
+    status = applyParameter(
+      () -> m_spark.getPIDController().setSmartMotionMaxVelocity(maxVel, PID_SLOT),
+      () -> m_spark.getPIDController().getSmartMotionMaxVelocity(PID_SLOT) == maxVel,
+      "Set smart motion max velocity error!"
+    );
+    return status;
+  }
+
+  public REVLibError setSmartMotionMinOutputVelocity(double minVel) {
+    REVLibError status;
+    status = applyParameter(
+      () -> m_spark.getPIDController().setSmartMotionMinOutputVelocity(minVel, PID_SLOT),
+      () -> m_spark.getPIDController().getSmartMotionMinOutputVelocity(PID_SLOT) == minVel,
+      "Set smart motion min output error!"
+    );
+    return status;
+  }
+
+  public REVLibError setSmartMotionMaxAccel(double maxAccel) {
+    REVLibError status;
+    status = applyParameter(
+      () -> m_spark.getPIDController().setSmartMotionMaxAccel(maxAccel, PID_SLOT),
+      () -> m_spark.getPIDController().getSmartMotionMaxAccel(PID_SLOT) == maxAccel,
+      "Set smart motion max acceleration!"
+    );
+    return status;
+  }
+
+  public REVLibError setSmartMotionAllowedClosedLoopError(double closedLoop) {
+    REVLibError status;
+    status = applyParameter(
+      () -> m_spark.getPIDController().setSmartMotionAllowedClosedLoopError(closedLoop, PID_SLOT),
+      () -> m_spark.getPIDController().getSmartMotionAllowedClosedLoopError(PID_SLOT) == closedLoop,
+      "Set smart motion allowed closed loop error!"
+    );
+    return status;
   }
 
   /**
    * Set motor output duty cycle
-   * @param value Value to set [-1.0, +1.0]
    */
   public void set(double value) {
     set(value, ControlType.kDutyCycle);
@@ -881,6 +981,13 @@ public class Spark implements LoggableHardware, AutoCloseable {
     );
     System.out.println(String.join(" ", m_id.name, "Encoder reset!"));
     return status;
+  }
+  /**
+   * Reset NEO built-in encoder to given value
+   */
+  public void resetEncoder(double position) {
+    m_spark.getEncoder().setPosition(position);
+    //System.out.println(String.join(" ", m_id.name, "Encoder reset to "+position+"!"));
   }
 
   /**
