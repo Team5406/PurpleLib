@@ -165,7 +165,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     DRIVE_METERS_PER_TICK = 1 / DRIVE_TICKS_PER_METER;
     DRIVE_METERS_PER_ROTATION = DRIVE_METERS_PER_TICK * encoderTicksPerRotation;
     DRIVE_MAX_LINEAR_SPEED = (GlobalConstants.NEO_MAX_RPM / 60) * DRIVE_METERS_PER_ROTATION * DRIVETRAIN_EFFICIENCY;
-    DRIVE_MOTOR_CURRENT_LIMIT = (int)driveMotorCurrentLimit.in(Units.Amps);
+    DRIVE_MOTOR_CURRENT_LIMIT = driveMotorCurrentLimit;
     DRIVE_ROTATE_INVERT_MOTOR = inverted;
 
     this.m_driveMotor = swerveHardware.driveMotor;
