@@ -223,8 +223,6 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
     m_driveMotor.setMeasurementPeriod();
     m_driveMotor.setAverageDepth();
-    m_rotateMotor.setMeasurementPeriod();
-    m_rotateMotor.setAverageDepth();
     
     // Set drive motor to coast
     m_driveMotor.setIdleMode(IdleMode.kCoast);

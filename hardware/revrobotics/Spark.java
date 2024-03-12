@@ -252,26 +252,6 @@ public class Spark implements LoggableHardware, AutoCloseable {
     return status;
   }
 
-    /**
-   * Attempt to apply parameter for void methods and check if specified parameter is set correctly
-   * @param parameterSetter Method to set desired parameter
-   * @param parameterCheckSupplier Method to check for parameter in question
-   * @return {@link REVLibError#kOk} if successful
-   */
-  private void applyParameter(Runnable parameterSetter, BooleanSupplier parameterCheckSupplier, String errorMessage) {
-    REVLibError status = REVLibError.kError;
-    for (int i = 0; i < MAX_ATTEMPTS; i++) {
-      parameterSetter.run();
-      if (parameterCheckSupplier.getAsBoolean()){
-        status = REVLibError.kOk;
-        break;
-      }
-      Timer.delay(APPLY_PARAMETER_WAIT_TIME);
-    }
-    checkStatus(status, errorMessage);
-
-  }
-
   /**
    * Attempt to apply parameter and check if specified parameter is set correctly, for void setters
    * @param parameterSetter Method to set desired parameter
@@ -415,48 +395,13 @@ public class Spark implements LoggableHardware, AutoCloseable {
     return m_spark.getReverseLimitSwitch(m_limitSwitchType);
   }
 
-   /**
-   * Set encoder velocity measurement period
-   * <p>
-   * Sets to {@value Spark#SPARK_MAX_MEASUREMENT_PERIOD} for Spark Max, {@value Spark#SPARK_FLEX_MEASUREMENT_PERIOD} for Spark Flex
-   * @return {@link REVLibError#kOk} if successful
-   */
-  public REVLibError setMeasurementPeriod() {
-    REVLibError status;
-    int period = getKind().equals(MotorKind.NEO_VORTEX) ? SPARK_FLEX_MEASUREMENT_PERIOD : SPARK_MAX_MEASUREMENT_PERIOD;
-    status = applyParameter(
-      () -> m_spark.getEncoder().setMeasurementPeriod(period),
-      () -> m_spark.getEncoder().getMeasurementPeriod() == period,
-      "Set encoder measurement period failure!"
-    );
-    return status;
-  }
-
-
-    /**
-   * Set encoder velocity measurement average depth
-   * <p>
-   * Sets to {@value Spark#SPARK_MAX_AVERAGE_DEPTH} for Spark Max, {@value Spark#SPARK_FLEX_AVERAGE_DEPTH} for Spark Flex
-   * @return {@link REVLibError#kOk} if successful
-   */
-  public REVLibError setAverageDepth() {
-    REVLibError status;
-    int averageDepth = getKind().equals(MotorKind.NEO_VORTEX) ? SPARK_FLEX_AVERAGE_DEPTH : SPARK_MAX_AVERAGE_DEPTH;
-    status = applyParameter(
-      () -> m_spark.getEncoder().setAverageDepth(averageDepth),
-      () -> m_spark.getEncoder().getAverageDepth() == averageDepth,
-      "Set encoder average depth failure!"
-    );
-    return status;
-  }
-
   /**
    * Set encoder velocity measurement period
    * <p>
    * Sets to {@value Spark#SPARK_MAX_MEASUREMENT_PERIOD} for Spark Max, {@value Spark#SPARK_FLEX_MEASUREMENT_PERIOD} for Spark Flex
    * @return {@link REVLibError#kOk} if successful
    */
-  private REVLibError setMeasurementPeriod() {
+  public REVLibError setMeasurementPeriod() {
     REVLibError status;
     int period = getKind().equals(MotorKind.NEO_VORTEX) ? SPARK_FLEX_MEASUREMENT_PERIOD : SPARK_MAX_MEASUREMENT_PERIOD;
     status = applyParameter(
@@ -473,7 +418,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
    * Sets to {@value Spark#SPARK_MAX_AVERAGE_DEPTH} for Spark Max, {@value Spark#SPARK_FLEX_AVERAGE_DEPTH} for Spark Flex
    * @return {@link REVLibError#kOk} if successful
    */
-  private REVLibError setAverageDepth() {
+  public REVLibError setAverageDepth() {
     REVLibError status;
     int averageDepth = getKind().equals(MotorKind.NEO_VORTEX) ? SPARK_FLEX_AVERAGE_DEPTH : SPARK_MAX_AVERAGE_DEPTH;
     status = applyParameter(
@@ -726,7 +671,6 @@ public class Spark implements LoggableHardware, AutoCloseable {
       () -> m_spark.getInverted() == isInverted,
       "Set motor inverted failure!"
     );
-      "Set inverted failure!"
 
   }
   public REVLibError setSmartMotionMaxVelocity(double maxVel) {
