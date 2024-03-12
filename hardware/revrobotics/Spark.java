@@ -8,6 +8,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import org.apache.commons.math3.util.Precision;
 import org.lasarobotics.hardware.LoggableHardware;
 import org.lasarobotics.utils.GlobalConstants;
 import org.littletonrobotics.junction.AutoLog;
@@ -25,14 +26,18 @@ import com.revrobotics.CANSparkMax;
 import com.revrobotics.MotorFeedbackSensor;
 import com.revrobotics.REVLibError;
 import com.revrobotics.REVPhysicsSim;
+import com.revrobotics.RelativeEncoder;
 import com.revrobotics.SparkAbsoluteEncoder;
 import com.revrobotics.SparkAnalogSensor;
+import com.revrobotics.SparkHelpers;
 import com.revrobotics.SparkLimitSwitch;
 import com.revrobotics.SparkPIDController;
+import com.revrobotics.SparkRelativeEncoder;
 
 import edu.wpi.first.math.filter.Debouncer;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
+import edu.wpi.first.units.Current;
 import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Time;
 import edu.wpi.first.units.Units;
@@ -103,8 +108,14 @@ public class Spark implements LoggableHardware, AutoCloseable {
     public boolean reverseLimitSwitch = false;
   }
 
+  private static final int CAN_TIMEOUT_MS = 50;
   private static final int PID_SLOT = 0;
-  private static final int MAX_ATTEMPTS = 5;
+  private static final int MAX_ATTEMPTS = 20;
+  private static final int SPARK_MAX_MEASUREMENT_PERIOD = 16;
+  private static final int SPARK_FLEX_MEASUREMENT_PERIOD = 32;
+  private static final int SPARK_MAX_AVERAGE_DEPTH = 2;
+  private static final int SPARK_FLEX_AVERAGE_DEPTH = 8;
+  private static final double EPSILON = 2e-8;
   private static final double MAX_VOLTAGE = 12.0;
   private static final double BURN_FLASH_WAIT_TIME = 0.5;
   private static final double APPLY_PARAMETER_WAIT_TIME = 0.1;
@@ -112,6 +123,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
   private static final String VALUE_LOG_ENTRY = "/OutputValue";
   private static final String MODE_LOG_ENTRY = "/OutputMode";
   private static final String CURRENT_LOG_ENTRY = "/Current";
+  private static final String TEMPERATURE_LOG_ENTRY = "/Temperature";
   private static final String MOTION_LOG_ENTRY = "/SmoothMotion";
 
 
@@ -133,36 +145,66 @@ public class Spark implements LoggableHardware, AutoCloseable {
   private SparkPIDConfig m_config;
   private FeedbackSensor m_feedbackSensor;
   private SparkLimitSwitch.Type m_limitSwitchType = SparkLimitSwitch.Type.kNormallyOpen;
+  private RelativeEncoder m_encoder;
 
   /**
-   * Create a Spark with built-in logging and is unit-testing friendly
+   * Create a Spark that is unit-testing friendly with built-in logging
    * @param id Spark ID
    * @param kind The kind of motor connected to the controller
+   * @param limitSwitchType Polarity of connected limit switches
    */
-  public Spark(ID id, MotorKind kind) {
-    if (kind == MotorKind.NEO_VORTEX) {
+  public Spark(ID id, MotorKind kind, SparkLimitSwitch.Type limitSwitchType) {
+    if (kind.equals(MotorKind.NEO_VORTEX)) {
       this.m_spark = new CANSparkFlex(id.deviceID, kind.type);
+      this.m_encoder = m_spark.getEncoder(SparkRelativeEncoder.Type.kQuadrature, GlobalConstants.VORTEX_ENCODER_TICKS_PER_ROTATION);
     } else {
       this.m_spark = new CANSparkMax(id.deviceID, kind.type);
+      this.m_encoder = m_spark.getEncoder(SparkRelativeEncoder.Type.kHallSensor, GlobalConstants.NEO_ENCODER_TICKS_PER_ROTATION);
       REVPhysicsSim.getInstance().addSparkMax((CANSparkMax)m_spark, kind.motor);
     }
     this.m_id = id;
     this.m_kind = kind;
     this.m_inputs = new SparkInputsAutoLogged();
     this.m_isSmoothMotionEnabled = false;
+    this.m_limitSwitchType = limitSwitchType;
 
+    // Set CAN timeout
+    m_spark.setCANTimeout(CAN_TIMEOUT_MS);
+
+    // Restore defaults
     m_spark.restoreFactoryDefaults();
     m_spark.enableVoltageCompensation(MAX_VOLTAGE);
+
+    // Fix velocity measurements
+    if (getMotorType() == MotorType.kBrushless) {
+      setMeasurementPeriod();
+      setAverageDepth();
+    }
+
+    // Refresh inputs on initialization
+    periodic();
   }
 
   /**
-   * Create a Spark with built-in logging, is unit-testing friendly and configure PID
+   * Create a Spark that is unit-testing friendly with built-in logging
+   * <p>
+   * Defaults to normally-open limit switches
    * @param id Spark ID
    * @param kind The kind of motor connected to the controller
+   */
+  public Spark(ID id, MotorKind kind) {
+    this(id, kind, SparkLimitSwitch.Type.kNormallyOpen);
+  }
+
+  /**
+   * Create a Spark that is unit-testing friendly with built-in logging and configure PID
+   * @param id Spark ID
+   * @param kind The kind of motor connected to the controller
+   * @param limitSwitchType Polarity of connected limit switches
    * @param config PID config for Spark
    * @param feedbackSensor Feedback device to use for Spark PID
    */
-  public Spark(ID id, MotorKind kind, SparkPIDConfig config, FeedbackSensor feedbackSensor) {
+  public Spark(ID id, MotorKind kind, SparkLimitSwitch.Type limitSwitchType, SparkPIDConfig config, FeedbackSensor feedbackSensor) {
     this(id, kind);
 
     this.m_config = config;
@@ -175,6 +217,19 @@ public class Spark implements LoggableHardware, AutoCloseable {
   }
 
   /**
+   * Create a Spark that is unit-testing friendly with built-in logging and configure PID
+   * <p>
+   * Defaults to normally-open limit switches
+   * @param id Spark ID
+   * @param kind The kind of motor connected to the controller
+   * @param config PID config for Spark
+   * @param feedbackSensor Feedback device to use for Spark PID
+   */
+  public Spark(ID id, MotorKind kind, SparkPIDConfig config, FeedbackSensor feedbackSensor) {
+    this(id, kind, SparkLimitSwitch.Type.kNormallyOpen, config, feedbackSensor);
+  }
+
+  /**
    * Attempt to apply parameter and check if specified parameter is set correctly
    * @param parameterSetter Method to set desired parameter
    * @param parameterCheckSupplier Method to check for parameter in question
@@ -182,6 +237,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
    */
   private REVLibError applyParameter(Supplier<REVLibError> parameterSetter, BooleanSupplier parameterCheckSupplier, String errorMessage) {
     if (RobotBase.isSimulation()) return parameterSetter.get();
+    if (parameterCheckSupplier.getAsBoolean()) return REVLibError.kOk;
 
     REVLibError status = REVLibError.kError;
     for (int i = 0; i < MAX_ATTEMPTS; i++) {
@@ -192,6 +248,24 @@ public class Spark implements LoggableHardware, AutoCloseable {
 
     checkStatus(status, errorMessage);
     return status;
+  }
+
+  /**
+   * Attempt to apply parameter and check if specified parameter is set correctly, for void setters
+   * @param parameterSetter Method to set desired parameter
+   * @param parameterCheckSupplier Method to check for parameter in question
+   */
+  private void applyParameter(Runnable parameterSetter, BooleanSupplier parameterCheckSupplier, String errorMessage) {
+    if (RobotBase.isSimulation()) return;
+    if (parameterCheckSupplier.getAsBoolean()) return;
+
+    for (int i = 0; i < MAX_ATTEMPTS; i++) {
+      parameterSetter.run();
+      if (parameterCheckSupplier.getAsBoolean()) return;
+      Timer.delay(APPLY_PARAMETER_WAIT_TIME);
+    }
+
+    System.err.println(String.join(" ", m_id.name, errorMessage));
   }
 
   /**
@@ -215,12 +289,20 @@ public class Spark implements LoggableHardware, AutoCloseable {
   }
 
   /**
+   * Returns an object for interfacing with the built-in encoder
+   * @return
+   */
+  private RelativeEncoder getEncoder() {
+    return m_encoder;
+  }
+
+  /**
    * Get the position of the motor encoder. This returns the native units of 'rotations' by default, and can
    * be changed by a scale factor using setPositionConversionFactor().
    * @return Number of rotations of the motor
    */
   private double getEncoderPosition() {
-    return m_spark.getEncoder().getPosition();
+    return getEncoder().getPosition();
   }
 
   /**
@@ -229,7 +311,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
    * @return Number the RPM of the motor
    */
   private double getEncoderVelocity() {
-    return m_spark.getEncoder().getVelocity();
+    return getEncoder().getVelocity();
   }
 
   /**
@@ -311,6 +393,40 @@ public class Spark implements LoggableHardware, AutoCloseable {
   }
 
   /**
+   * Set encoder velocity measurement period
+   * <p>
+   * Sets to {@value Spark#SPARK_MAX_MEASUREMENT_PERIOD} for Spark Max, {@value Spark#SPARK_FLEX_MEASUREMENT_PERIOD} for Spark Flex
+   * @return {@link REVLibError#kOk} if successful
+   */
+  private REVLibError setMeasurementPeriod() {
+    REVLibError status;
+    int period = getKind().equals(MotorKind.NEO_VORTEX) ? SPARK_FLEX_MEASUREMENT_PERIOD : SPARK_MAX_MEASUREMENT_PERIOD;
+    status = applyParameter(
+      () -> getEncoder().setMeasurementPeriod(period),
+      () -> getEncoder().getMeasurementPeriod() == period,
+      "Set encoder measurement period failure!"
+    );
+    return status;
+  }
+
+  /**
+   * Set encoder velocity measurement average depth
+   * <p>
+   * Sets to {@value Spark#SPARK_MAX_AVERAGE_DEPTH} for Spark Max, {@value Spark#SPARK_FLEX_AVERAGE_DEPTH} for Spark Flex
+   * @return {@link REVLibError#kOk} if successful
+   */
+  private REVLibError setAverageDepth() {
+    REVLibError status;
+    int averageDepth = getKind().equals(MotorKind.NEO_VORTEX) ? SPARK_FLEX_AVERAGE_DEPTH : SPARK_MAX_AVERAGE_DEPTH;
+    status = applyParameter(
+      () -> getEncoder().setAverageDepth(averageDepth),
+      () -> getEncoder().getAverageDepth() == averageDepth,
+      "Set encoder average depth failure!"
+    );
+    return status;
+  }
+
+  /**
    * Update sensor input readings
    */
   private void updateInputs() {
@@ -384,6 +500,9 @@ public class Spark implements LoggableHardware, AutoCloseable {
 
     Logger.recordOutput(m_id.name + CURRENT_LOG_ENTRY, m_spark.getOutputCurrent());
     Logger.recordOutput(m_id.name + MOTION_LOG_ENTRY, m_isSmoothMotionEnabled);
+
+    if (getMotorType() == MotorType.kBrushed) return;
+    Logger.recordOutput(m_id.name + TEMPERATURE_LOG_ENTRY, m_spark.getMotorTemperature());
   }
 
   /**
@@ -425,7 +544,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
    */
   public boolean isSmoothMotionFinished() {
     return m_smoothMotionFinishedDebouncer.calculate(
-      Math.abs(m_currentStateSupplier.get().position - m_desiredState.position) < m_config.getTolerance()
+      Precision.equals(m_currentStateSupplier.get().position, m_desiredState.position, m_config.getTolerance())
     );
   }
 
@@ -438,7 +557,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
    */
   public void initializeSparkPID(SparkPIDConfig config, FeedbackSensor feedbackSensor,
                                  boolean forwardLimitSwitch, boolean reverseLimitSwitch) {
-    if (getMotorType() == MotorType.kBrushed && feedbackSensor == FeedbackSensor.NEO_ENCODER)
+    if (getMotorType().equals(MotorType.kBrushed) && feedbackSensor.equals(FeedbackSensor.NEO_ENCODER))
       throw new IllegalArgumentException("NEO encoder cannot be used with a brushed motor!");
 
     m_config = config;
@@ -451,25 +570,29 @@ public class Spark implements LoggableHardware, AutoCloseable {
     MotorFeedbackSensor selectedSensor;
     switch (m_feedbackSensor) {
       case ANALOG:
-        selectedSensor = m_spark.getAnalog(SparkAnalogSensor.Mode.kAbsolute);
+        selectedSensor = getAnalog();
         m_currentStateSupplier = () -> new TrapezoidProfile.State(getInputs().analogPosition, getInputs().analogVelocity);
         break;
       case THROUGH_BORE_ENCODER:
-        selectedSensor = m_spark.getAbsoluteEncoder(SparkAbsoluteEncoder.Type.kDutyCycle);
+        selectedSensor = getAbsoluteEncoder();
         m_currentStateSupplier = () -> new TrapezoidProfile.State(getInputs().absoluteEncoderPosition, getInputs().absoluteEncoderVelocity);
         break;
       case NEO_ENCODER:
       default:
-        selectedSensor = m_spark.getEncoder();
+        selectedSensor = getEncoder();
         m_currentStateSupplier = () -> new TrapezoidProfile.State(getInputs().encoderPosition, getInputs().encoderVelocity);
         break;
     }
 
     // Configure feedback sensor and set sensor phase
-    try {
-      m_spark.getPIDController().setFeedbackDevice(selectedSensor);
-      selectedSensor.setInverted(m_config.getSensorPhase());
-    } catch (IllegalArgumentException e) {}
+    m_spark.getPIDController().setFeedbackDevice(selectedSensor);
+    if (!m_feedbackSensor.equals(FeedbackSensor.NEO_ENCODER)) {
+      applyParameter(
+        () -> selectedSensor.setInverted(m_config.getSensorPhase()),
+        () -> selectedSensor.getInverted() == m_config.getSensorPhase(),
+      "Set sensor phase failure!"
+      );
+    }
 
     // Configure forward and reverse soft limits
     if (config.isSoftLimitEnabled()) {
@@ -479,15 +602,9 @@ public class Spark implements LoggableHardware, AutoCloseable {
       enableReverseSoftLimit();
     }
 
-    // Configure forward and reverse limit switches if required, and disable soft limit
-    if (forwardLimitSwitch) {
-      enableForwardLimitSwitch();
-      disableForwardSoftLimit();
-    }
-    if (reverseLimitSwitch) {
-      enableReverseLimitSwitch();
-      disableReverseSoftLimit();
-    }
+    // Configure forward and reverse limit switches if required
+    if (forwardLimitSwitch) enableForwardLimitSwitch();
+    if (reverseLimitSwitch) enableReverseLimitSwitch();
 
     // Invert motor if required
     setInverted(config.getInverted());
@@ -497,7 +614,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     setI(config.getI());
     setD(config.getD());
     setF(config.getF());
-    setIzone(config.getI() != 0.0 ? config.getTolerance() * 2 : 0.0);
+    setIZone(config.getIZone());
   }
 
   /**
@@ -544,7 +661,11 @@ public class Spark implements LoggableHardware, AutoCloseable {
    * @param isInverted The state of inversion, true is inverted.
    */
   public void setInverted(boolean isInverted) {
-    m_spark.setInverted(isInverted);
+    applyParameter(
+      () -> m_spark.setInverted(isInverted),
+      () -> m_spark.getInverted() == isInverted,
+      "Set motor inverted failure!"
+    );
   }
 
   /**
@@ -578,14 +699,6 @@ public class Spark implements LoggableHardware, AutoCloseable {
   }
 
   /**
-   * Change the limit switch type
-   * @param type The desired limit switch type
-   */
-  public void setLimitSwitchType(SparkLimitSwitch.Type type) {
-    m_limitSwitchType = type;
-  }
-
-  /**
    * Set the conversion factor for position of the encoder. Multiplied by the native output units to
    * give you position.
    * @param sensor Sensor to set conversion factor for
@@ -598,16 +711,16 @@ public class Spark implements LoggableHardware, AutoCloseable {
     BooleanSupplier parameterCheckSupplier;
     switch (sensor) {
       case NEO_ENCODER:
-        parameterSetter = () -> m_spark.getEncoder().setPositionConversionFactor(factor);
-        parameterCheckSupplier = () -> m_spark.getEncoder().getPositionConversionFactor() == factor;
+        parameterSetter = () -> getEncoder().setPositionConversionFactor(factor);
+        parameterCheckSupplier = () -> Precision.equals(getEncoder().getPositionConversionFactor(), factor, EPSILON);
         break;
       case ANALOG:
         parameterSetter = () -> getAnalog().setPositionConversionFactor(factor);
-        parameterCheckSupplier = () -> getAnalog().getPositionConversionFactor() == factor;
+        parameterCheckSupplier = () -> Precision.equals(getAnalog().getPositionConversionFactor(), factor, EPSILON);
         break;
       case THROUGH_BORE_ENCODER:
         parameterSetter = () -> getAbsoluteEncoder().setPositionConversionFactor(factor);
-        parameterCheckSupplier = () -> getAbsoluteEncoder().getPositionConversionFactor() == factor;
+        parameterCheckSupplier = () -> Precision.equals(getAbsoluteEncoder().getPositionConversionFactor(), factor, EPSILON);
         break;
       default:
         parameterSetter = () -> REVLibError.kOk;
@@ -632,16 +745,16 @@ public class Spark implements LoggableHardware, AutoCloseable {
     BooleanSupplier parameterCheckSupplier;
     switch (sensor) {
       case NEO_ENCODER:
-        parameterSetter = () -> m_spark.getEncoder().setVelocityConversionFactor(factor);
-        parameterCheckSupplier = () -> m_spark.getEncoder().getVelocityConversionFactor() == factor;
+        parameterSetter = () -> getEncoder().setVelocityConversionFactor(factor);
+        parameterCheckSupplier = () -> Precision.equals(getEncoder().getVelocityConversionFactor(), factor, EPSILON);
         break;
       case ANALOG:
         parameterSetter = () -> getAnalog().setVelocityConversionFactor(factor);
-        parameterCheckSupplier = () -> getAnalog().getVelocityConversionFactor() == factor;
+        parameterCheckSupplier = () -> Precision.equals(getAnalog().getVelocityConversionFactor(), factor, EPSILON);
         break;
       case THROUGH_BORE_ENCODER:
         parameterSetter = () -> getAbsoluteEncoder().setVelocityConversionFactor(factor);
-        parameterCheckSupplier = () -> getAnalog().getVelocityConversionFactor() == factor;
+        parameterCheckSupplier = () -> Precision.equals(getAnalog().getVelocityConversionFactor(), factor, EPSILON);
         break;
       default:
         parameterSetter = () -> REVLibError.kOk;
@@ -662,7 +775,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     REVLibError status;
     status = applyParameter(
       () -> m_spark.getPIDController().setP(value),
-      () -> m_spark.getPIDController().getP() == value,
+      () -> Precision.equals(m_spark.getPIDController().getP(), value, EPSILON),
       "Set kP failure!"
     );
     return status;
@@ -677,7 +790,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     REVLibError status;
     status = applyParameter(
       () -> m_spark.getPIDController().setI(value),
-      () -> m_spark.getPIDController().getI() == value,
+      () -> Precision.equals(m_spark.getPIDController().getI(), value, EPSILON),
       "Set kI failure!"
     );
     return status;
@@ -692,7 +805,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     REVLibError status;
     status = applyParameter(
       () -> m_spark.getPIDController().setD(value),
-      () -> m_spark.getPIDController().getD() == value,
+      () -> Precision.equals(m_spark.getPIDController().getD(), value, EPSILON),
       "Set kD failure!"
     );
     return status;
@@ -707,7 +820,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     REVLibError status;
     status = applyParameter(
       () -> m_spark.getPIDController().setFF(value),
-      () -> m_spark.getPIDController().getFF() == value,
+      () -> Precision.equals(m_spark.getPIDController().getFF(), value, EPSILON),
       "Set kF failure!"
     );
     return status;
@@ -720,12 +833,12 @@ public class Spark implements LoggableHardware, AutoCloseable {
    * @param value Value to set
    * @return {@link REVLibError#kOk} if successful
    */
-  public REVLibError setIzone(double value) {
+  public REVLibError setIZone(double value) {
     REVLibError status;
     status = applyParameter(
       () -> m_spark.getPIDController().setIZone(value),
-      () -> m_spark.getPIDController().getIZone() == value,
-      "Set Izone failure!"
+      () -> Precision.equals(m_spark.getPIDController().getIZone(), value, EPSILON),
+      "Set IZone failure!"
     );
     return status;
   }
@@ -743,6 +856,8 @@ public class Spark implements LoggableHardware, AutoCloseable {
     m_desiredState = new TrapezoidProfile.State(value, 0.0);
     m_motionProfile = new TrapezoidProfile(m_motionConstraint);
     m_smoothMotionState = m_currentStateSupplier.get();
+
+    handleSmoothMotion();
   }
 
   /**
@@ -757,9 +872,15 @@ public class Spark implements LoggableHardware, AutoCloseable {
   /**
    * Reset NEO built-in encoder
    */
-  public void resetEncoder() {
-    m_spark.getEncoder().setPosition(0.0);
+  public REVLibError resetEncoder() {
+    REVLibError status;
+    status = applyParameter(
+      () -> getEncoder().setPosition(0.0),
+      () -> Precision.equals(getEncoderPosition(), 0.0, EPSILON),
+      "Reset encoder failure!"
+    );
     System.out.println(String.join(" ", m_id.name, "Encoder reset!"));
+    return status;
   }
 
   /**
@@ -827,7 +948,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     REVLibError status;
     status = applyParameter(
       () -> m_spark.setSoftLimit(SoftLimitDirection.kForward, (float)limit),
-      () -> m_spark.getSoftLimit(SoftLimitDirection.kForward) == limit,
+      () -> Precision.equals(m_spark.getSoftLimit(SoftLimitDirection.kForward), limit, EPSILON),
       "Set forward soft limit failure!"
     );
     return status;
@@ -842,7 +963,7 @@ public class Spark implements LoggableHardware, AutoCloseable {
     REVLibError status;
     status = applyParameter(
       () -> m_spark.setSoftLimit(SoftLimitDirection.kReverse, (float)limit),
-      () -> m_spark.getSoftLimit(SoftLimitDirection.kReverse) == limit,
+      () -> Precision.equals(m_spark.getSoftLimit(SoftLimitDirection.kReverse), limit, EPSILON),
       "Set reverse soft limit failure!"
     );
     return status;
@@ -921,8 +1042,8 @@ public class Spark implements LoggableHardware, AutoCloseable {
     };
     BooleanSupplier parameterCheckSupplier = () ->
       m_spark.getPIDController().getPositionPIDWrappingEnabled() == true &&
-      m_spark.getPIDController().getPositionPIDWrappingMinInput() == minInput &&
-      m_spark.getPIDController().getPositionPIDWrappingMaxInput() == maxInput;
+      Precision.equals(m_spark.getPIDController().getPositionPIDWrappingMinInput(), minInput, EPSILON) &&
+      Precision.equals(m_spark.getPIDController().getPositionPIDWrappingMaxInput(), maxInput, EPSILON);
 
     status = applyParameter(parameterSetter, parameterCheckSupplier, "Enable position PID wrapping failure!");
     return status;
@@ -964,18 +1085,18 @@ public class Spark implements LoggableHardware, AutoCloseable {
    * limit. This limit is enabled by default and used for brushless only. This limit is highly
    * recommended when using the NEO brushless motor.
    *
-   * <p>The NEO Brushless Motor has a low internal resistance, which can mean large current spikes
+   * <p>The motor controller has a low internal resistance, which can mean large current spikes
    * that could be enough to cause damage to the motor and controller. This current limit provides a
    * smarter strategy to deal with high current draws and keep the motor and controller operating in
    * a safe region.
    *
-   * @param limit The current limit in Amps.
+   * @param limit The desired current limit
    */
-  public REVLibError setSmartCurrentLimit(int limit) {
+  public REVLibError setSmartCurrentLimit(Measure<Current> limit) {
     REVLibError status;
     status = applyParameter(
-      () -> m_spark.setSmartCurrentLimit(limit),
-      () -> true,
+      () -> m_spark.setSmartCurrentLimit((int)limit.in(Units.Amps)),
+      () -> SparkHelpers.getSmartCurrentLimit(m_spark) == (int)limit.in(Units.Amps),
       "Set current limit failure!"
     );
     return status;

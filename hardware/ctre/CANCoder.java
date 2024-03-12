@@ -14,28 +14,30 @@ import com.ctre.phoenix6.signals.SensorDirectionValue;
 
 /** CTRE CANCoder */
 public class CANCoder implements LoggableHardware, AutoCloseable {
-  /** CANCoder Status Frame */
-  public enum CANCoderFrame {
-    ABSOLUTE_POSITION,
-    POSITION,
-    VELOCITY
-  }
-
   /** CANCoder ID */
   public static class ID {
     public final String name;
-    public PhoenixCANBus bus;
+    public final PhoenixCANBus bus;
     public final int deviceID;
 
     /**
      * CANCoder ID
      * @param name Device name for logging
+     * @param bus CAN bus device is connected to
      * @param deviceID CAN ID
      */
-    public ID(String name, int deviceID) {
+    public ID(String name, PhoenixCANBus bus, int deviceID) {
       this.name = name;
+      this.bus = bus;
       this.deviceID = deviceID;
     }
+  }
+
+  /** CANCoder Status Frame */
+  public enum CANCoderFrame {
+    ABSOLUTE_POSITION,
+    RELATIVE_POSITION,
+    VELOCITY
   }
 
   @AutoLog
@@ -57,6 +59,9 @@ public class CANCoder implements LoggableHardware, AutoCloseable {
   public CANCoder(ID id) {
     this.m_id = id;
     this.m_canCoder = new com.ctre.phoenix6.hardware.CANcoder(m_id.deviceID, m_id.bus.name);
+    this.m_inputs = new CANCoderInputsAutoLogged();
+
+    periodic();
   }
 
    /**
@@ -202,7 +207,7 @@ public class CANCoder implements LoggableHardware, AutoCloseable {
     switch (statusFrame) {
       case ABSOLUTE_POSITION:
         return m_canCoder.getAbsolutePosition().setUpdateFrequency(frequencyHz);
-      case POSITION:
+      case RELATIVE_POSITION:
         return m_canCoder.getPosition().setUpdateFrequency(frequencyHz);
       case VELOCITY:
         return m_canCoder.getVelocity().setUpdateFrequency(frequencyHz);
