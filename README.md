@@ -72,3 +72,55 @@ An example swerve project is [here](https://github.com/lasarobotics/PurpleSwerve
 
 ## Documentation
 Javadocs available [here](https://jitpack.io/com/github/lasarobotics/PurpleLib/latest/javadoc/)
+
+## Updating Fork
+Instructions for updating our fork of PurpleLib and submodules:
+
+* Sync fork on github
+
+* git bash in a folder of your choice
+```
+git clone https://github.com/Team5406/PurpleLib.git
+```
+* If you want to list your remotes: `git remote -v`
+  
+* pull down changes:
+```
+git subtree pull --prefix src/main/java/org/lasarobotics origin src-main --squash
+```
+* check for any changes and merge conflcts with `git status`
+
+* open each file that has merge conflicts inside vscode and deal with them
+
+* stage all changes to files with `git add .`
+```
+git status
+```
+* if all modified files are green, proceed
+```
+git commit -m "resolved merge conflicts"
+```
+* confirm you got everything with `git subtree pull --prefix src/main/java/org/lasarobotics origin src-main --squash`
+
+* push it up with `git subtree push --prefix src/main/java/org/lasarobotics origin src-main`
+
+* do the same for src-test:
+```
+git subtree pull --prefix src/test/java/org/lasarobotics origin src-test --squash
+git subtree push --prefix src/test/java/org/lasarobotics origin src-test
+```
+
+* double check again:
+```
+git checkout src-main
+git pull
+git checkout src-test
+git pull
+```
+* go back to main and find a file with recent updates and then compare it (cat will open the file to view tis contents) to see that everything is up to date and nothing is missing:
+```
+git checkout src-main
+cd ______
+cat ______
+```
+check one more time with `git status`
