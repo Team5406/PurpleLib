@@ -108,14 +108,14 @@ public class SDSMK4SwerveModule implements AutoCloseable {
   private final double DRIVE_MAX_LINEAR_SPEED;
 
   // Swerve velocity PID settings
-  private static final double DRIVE_VELOCITY_kP = 0.04;
-  private static final double DRIVE_VELOCITY_TOLERANCE = 0.01;
+  private static final double DRIVE_VELOCITY_kP = 0.02;
+  private static final double DRIVE_VELOCITY_TOLERANCE = 0.02;
   private static final boolean DRIVE_VELOCITY_SENSOR_PHASE = false;
   private static final boolean DRIVE_INVERT_MOTOR = false;
 
   // Swerve rotate PID settings
   private static final PIDConstants DRIVE_ROTATE_PID = new PIDConstants(0.5, 0.0, 0.0, 0.0, 0.0);
-  private static final double DRIVE_ROTATE_TOLERANCE = 0.02;
+  private static final double DRIVE_ROTATE_TOLERANCE = 0.01;
   private static final double DRIVE_ROTATE_LOWER_LIMIT = 0.0;
   private static final double DRIVE_ROTATE_UPPER_LIMIT = 0.0;
   private static final boolean DRIVE_ROTATE_SOFT_LIMITS = false;
