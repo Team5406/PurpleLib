@@ -52,6 +52,7 @@ public class ToFSensor implements LoggableHardware, AutoCloseable {
     this.m_id = id;
     this.m_ToFSensor = new com.playingwithfusion.TimeOfFlight(m_id.deviceID);
     this.m_inputs = new ToFSensorInputsAutoLogged();
+    periodic();
   }
 //3 methods:
 public double getToFDistance() {
