@@ -168,6 +168,7 @@ public class NavX2 implements LoggableHardware, AutoCloseable {
    * Update NavX input readings
    */
   private void updateInputs() {
+    if(m_navx.isConnected()){
     m_inputs.pitchAngle = Units.Degrees.of(getPitch());
     m_inputs.yawAngle = Units.Degrees.of(getAngle());
     m_inputs.rollAngle = Units.Degrees.of(getRoll());
@@ -175,6 +176,7 @@ public class NavX2 implements LoggableHardware, AutoCloseable {
     m_inputs.yVelocity = Units.MetersPerSecond.of(getVelocityY());
     m_inputs.yawRate = Units.DegreesPerSecond.of(getRate());
     m_inputs.rotation2d = getRotation2d();
+    }
   }
 
   /**

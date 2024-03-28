@@ -840,6 +840,15 @@ public class Spark implements LoggableHardware, AutoCloseable {
     return status;
   }
 
+    /**
+   * Set integral gain for PIDF controller on Spark
+   * @param value Value to set
+   * @return {@link REVLibError#kOk} if successful
+   */
+  public REVLibError setIAccum(double value) {
+    return m_spark.getPIDController().setIAccum(value);
+  }
+
   /**
    * Set derivative gain for PIDF controller on Spark
    * @param value Value to set
