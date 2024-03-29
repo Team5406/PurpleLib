@@ -64,7 +64,7 @@ public class NavX2 implements LoggableHardware, AutoCloseable {
    */
   public NavX2(ID id, int updateRate) {
     this.m_name = id.name;
-    this.m_navx = new AHRS(SerialPort.Port.kUSB2);
+    this.m_navx = new AHRS(SPI.Port.kMXP, (byte)updateRate);
     this.m_inputs = new NavX2InputsAutoLogged();
     this.m_simNavXYaw = new SimDouble(SimDeviceDataJNI.getSimValueHandle(SimDeviceDataJNI.getSimDeviceHandle("navX-Sensor[0]"), "Yaw"));
     System.out.println();
