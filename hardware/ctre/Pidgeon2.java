@@ -49,7 +49,8 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
   public enum PigeonStatusFrame {
     PITCH,
     YAW,
-    ROLL
+    ROLL,
+    YAW_RATE
   }
 
   /**
@@ -79,6 +80,7 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
     this.m_inputs = new Pidgeon2InputsAutoLogged();
     this.m_simPidgeonYaw = new SimDouble(SimDeviceDataJNI.getSimValueHandle(SimDeviceDataJNI.getSimDeviceHandle("Pidgeon_Sensor[0]"), "Yaw"));
     setStatusFramePeriod(PigeonStatusFrame.YAW, UPDATE_FREQUENCY);
+    setStatusFramePeriod(PigeonStatusFrame.YAW_RATE, UPDATE_FREQUENCY);
     m_pidgeon.optimizeBusUtilization();
     periodic();
   }
@@ -105,7 +107,7 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
    * @return The current heading of the robot in degrees
    */
   private double getAngle() {
-    return m_pidgeon.getYaw().getValueAsDouble() - yawOffset;
+    return m_pidgeon.getAngle();
   }
 
   /**
@@ -224,6 +226,8 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
         return m_pidgeon.getYaw().setUpdateFrequency(frequencyHz);
       case ROLL:
         return m_pidgeon.getRoll().setUpdateFrequency(frequencyHz);
+      case YAW_RATE:
+        return m_pidgeon.getAngularVelocityZWorld().setUpdateFrequency(frequencyHz);
       default:
         return StatusCode.OK;
     }
