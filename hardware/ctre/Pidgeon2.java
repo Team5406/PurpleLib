@@ -14,6 +14,8 @@ import com.ctre.phoenix6.configs.MountPoseConfigs;
 import com.ctre.phoenix6.configs.Pigeon2Configuration;
 import com.ctre.phoenix6.hardware.Pigeon2;
 
+import edu.wpi.first.hal.SimDouble;
+import edu.wpi.first.hal.simulation.SimDeviceDataJNI;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.units.Angle;
 import edu.wpi.first.units.Measure;
@@ -22,6 +24,8 @@ import edu.wpi.first.units.Velocity;
 
 /** CTRE Pidgeon 2.0 */
 public class Pidgeon2 implements LoggableHardware, AutoCloseable {
+
+
   /** Pidgeon ID */
   public static class ID {
     public final String name;
@@ -45,7 +49,8 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
   public enum PigeonStatusFrame {
     PITCH,
     YAW,
-    ROLL
+    ROLL,
+    YAW_RATE
   }
 
   /**
@@ -64,12 +69,19 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
 
   private ID m_id;
   private Pidgeon2InputsAutoLogged m_inputs;
+  private SimDouble m_simPidgeonYaw;
+
+  private double yawOffset = 0;
+  private static final int UPDATE_FREQUENCY = 100;
 
   public Pidgeon2(ID id) {
     this.m_id = id;
     this.m_pidgeon = new Pigeon2(id.deviceID, id.bus.name);
     this.m_inputs = new Pidgeon2InputsAutoLogged();
-
+    this.m_simPidgeonYaw = new SimDouble(SimDeviceDataJNI.getSimValueHandle(SimDeviceDataJNI.getSimDeviceHandle("Pidgeon_Sensor[0]"), "Yaw"));
+    setStatusFramePeriod(PigeonStatusFrame.YAW, UPDATE_FREQUENCY);
+    setStatusFramePeriod(PigeonStatusFrame.YAW_RATE, UPDATE_FREQUENCY);
+    m_pidgeon.optimizeBusUtilization();
     periodic();
   }
 
@@ -95,7 +107,7 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
    * @return The current heading of the robot in degrees
    */
   private double getAngle() {
-    return m_pidgeon.getAngle();
+    return m_pidgeon.getYaw().getValueAsDouble();
   }
 
   /**
@@ -139,9 +151,9 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
    * Update Pidgeon input readings
    */
   private void updateInputs() {
-    m_inputs.pitchAngle = Units.Degrees.of(getPitch());
-    m_inputs.yawAngle = Units.Degrees.of(getAngle());
-    m_inputs.rollAngle = Units.Degrees.of(getRoll());
+    //m_inputs.pitchAngle = Units.Degrees.of(getPitch());
+    m_inputs.yawAngle = Units.Degrees.of(-getAngle());
+    //m_inputs.rollAngle = Units.Degrees.of(getRoll());
     m_inputs.yawRate = Units.DegreesPerSecond.of(getRate());
     m_inputs.rotation2d = getRotation2d();
   }
@@ -214,10 +226,29 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
         return m_pidgeon.getYaw().setUpdateFrequency(frequencyHz);
       case ROLL:
         return m_pidgeon.getRoll().setUpdateFrequency(frequencyHz);
+      case YAW_RATE:
+        return m_pidgeon.getAngularVelocityZWorld().setUpdateFrequency(frequencyHz);
       default:
         return StatusCode.OK;
     }
   }
+
+  /**
+   * Set yaw angle for simulator
+   * @param angle Angle to set in degrees
+   */
+  public void setSimAngle(double angle) {
+    m_simPidgeonYaw.set(angle);
+  }
+
+  /**
+   * Get yaw angle for simulator
+   * @return Simulated angle that was set
+   */
+  public double getSimAngle() {
+    return m_simPidgeonYaw.get();
+  }
+
 
   /**
    * Resets the Pigeon 2 to a heading of zero.
@@ -227,6 +258,8 @@ public class Pidgeon2 implements LoggableHardware, AutoCloseable {
    */
   public void reset() {
     m_pidgeon.reset();
+    yawOffset = m_pidgeon.getYaw().getValueAsDouble();
+    m_simPidgeonYaw.set(0.0);
   }
 
   @Override
