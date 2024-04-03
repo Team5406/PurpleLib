@@ -110,6 +110,10 @@ public class Pigeon2 implements LoggableHardware, AutoCloseable {
     return m_pigeon.getYaw().getValueAsDouble();
   }
 
+  public StatusCode setYaw(double yaw){
+    return m_pigeon.setYaw(yaw);
+  }
+
   /**
    * Returns the heading of the robot as a {@link Rotation2d}.
    * <p>
