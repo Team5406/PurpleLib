@@ -20,6 +20,7 @@ import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Units;
 import edu.wpi.first.units.Velocity;
 import edu.wpi.first.wpilibj.SPI;
+import edu.wpi.first.wpilibj.SerialPort;
 
 /** NavX2 */
 public class NavX2 implements LoggableHardware, AutoCloseable {
