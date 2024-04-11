@@ -62,7 +62,7 @@ public class CANCoder implements LoggableHardware, AutoCloseable {
     this.m_id = id;
     this.m_canCoder = new com.ctre.phoenix6.hardware.CANcoder(m_id.deviceID, m_id.bus.name);
     this.m_inputs = new CANCoderInputsAutoLogged();
-    m_canCoder.getAbsolutePosition().setUpdateFrequency(50);
+    m_canCoder.getAbsolutePosition().setUpdateFrequency(100);
     m_canCoder.optimizeBusUtilization();
 
     periodic();
@@ -106,6 +106,10 @@ public class CANCoder implements LoggableHardware, AutoCloseable {
     m_inputs.absolutePosition = getAbsolutePosition();
     m_inputs.relativePosition = getRelativePosition();
     m_inputs.velocity = getVelocity();
+  }
+
+  public void updateInputsPosition() {
+    m_inputs.absolutePosition = getAbsolutePosition();
   }
 
   /**

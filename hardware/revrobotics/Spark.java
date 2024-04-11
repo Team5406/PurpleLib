@@ -21,6 +21,7 @@ import com.revrobotics.CANSparkBase.ExternalFollower;
 import com.revrobotics.CANSparkBase.IdleMode;
 import com.revrobotics.CANSparkBase.SoftLimitDirection;
 import com.revrobotics.CANSparkFlex;
+import com.revrobotics.CANSparkLowLevel;
 import com.revrobotics.CANSparkLowLevel.MotorType;
 import com.revrobotics.CANSparkMax;
 import com.revrobotics.MotorFeedbackSensor;
@@ -172,6 +173,15 @@ public class Spark implements LoggableHardware, AutoCloseable {
 
     // Set CAN timeout
     m_spark.setCANTimeout(CAN_TIMEOUT_MS);
+
+    m_spark.setPeriodicFramePeriod(CANSparkLowLevel.PeriodicFrame.kStatus0, 100);
+    m_spark.setPeriodicFramePeriod(CANSparkLowLevel.PeriodicFrame.kStatus1, 20);
+    m_spark.setPeriodicFramePeriod(CANSparkLowLevel.PeriodicFrame.kStatus2, 10);
+    m_spark.setPeriodicFramePeriod(CANSparkLowLevel.PeriodicFrame.kStatus3, 500);
+    m_spark.setPeriodicFramePeriod(CANSparkLowLevel.PeriodicFrame.kStatus4, 500);
+    m_spark.setPeriodicFramePeriod(CANSparkLowLevel.PeriodicFrame.kStatus5, 500);
+    m_spark.setPeriodicFramePeriod(CANSparkLowLevel.PeriodicFrame.kStatus6, 500);
+    m_spark.setCANMaxRetries(3);
 
     // Restore defaults
     m_spark.restoreFactoryDefaults();
@@ -445,6 +455,11 @@ public class Spark implements LoggableHardware, AutoCloseable {
     m_inputs.encoderPosition = getEncoderPosition();
     m_inputs.encoderVelocity = getEncoderVelocity();
   }
+
+  public void updateInputsPosition() {
+    m_inputs.encoderPosition = getEncoderPosition();
+  }
+
 
   /**
    * Handle smooth motion

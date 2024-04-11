@@ -436,10 +436,13 @@ public class SDSMK4SwerveModule implements AutoCloseable {
    * @return Current module position
    */
   public SwerveModulePosition getPosition() {
+    m_driveMotor.updateInputsPosition();
+    m_absoluteEncoder.updateInputsPosition();
     return new SwerveModulePosition(
       m_driveMotor.getInputs().encoderPosition,
       //Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition).minus(m_location.offset) //uncomment for when you want to use simulator
       Rotation2d.fromRadians(m_absoluteEncoder.getInputs().absolutePosition).minus(m_location.offset) //only comment this line when using simulator
+
     );
   }
 
