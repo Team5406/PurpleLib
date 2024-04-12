@@ -164,7 +164,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
     DRIVE_TICKS_PER_METER = (encoderTicksPerRotation * driveGearRatio.value) * (1 / (DRIVE_WHEEL_DIAMETER_METERS * Math.PI));
     DRIVE_METERS_PER_TICK = 1 / DRIVE_TICKS_PER_METER;
     DRIVE_METERS_PER_ROTATION = DRIVE_METERS_PER_TICK * encoderTicksPerRotation;
-    DRIVE_MAX_LINEAR_SPEED = (GlobalConstants.NEO_MAX_RPM / 60) * DRIVE_METERS_PER_ROTATION * DRIVETRAIN_EFFICIENCY;
+    DRIVE_MAX_LINEAR_SPEED = (GlobalConstants.VORTEX_MAX_RPM / 60) * DRIVE_METERS_PER_ROTATION * DRIVETRAIN_EFFICIENCY;
     DRIVE_MOTOR_CURRENT_LIMIT = driveMotorCurrentLimit;
     DRIVE_ROTATE_INVERT_MOTOR = inverted;
 
@@ -352,7 +352,7 @@ public class SDSMK4SwerveModule implements AutoCloseable {
 
     // Optimize swerve module rotation state
     // Rotate motor returns an angle in radians
-    desiredState = SwerveModuleState.optimize(desiredState, Rotation2d.fromRadians(m_rotateMotor.getInputs().encoderPosition));
+    desiredState = SwerveModuleState.optimize(desiredState, Rotation2d.fromRadians(m_absoluteEncoder.getInputs().absolutePosition));
 
     // Set rotate motor position
     m_rotateMotor.set(desiredState.angle.getRadians(), ControlType.kPosition);

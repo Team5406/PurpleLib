@@ -171,7 +171,11 @@ public class Spark implements LoggableHardware, AutoCloseable {
     this.m_isSmoothMotionEnabled = false;
     this.m_limitSwitchType = limitSwitchType;
 
-    // Set CAN timeout
+    // Restore defaults
+    m_spark.restoreFactoryDefaults();
+    m_spark.enableVoltageCompensation(MAX_VOLTAGE);
+
+        // Set CAN timeout
     m_spark.setCANTimeout(CAN_TIMEOUT_MS);
 
     m_spark.setPeriodicFramePeriod(CANSparkLowLevel.PeriodicFrame.kStatus0, 100);
@@ -182,10 +186,6 @@ public class Spark implements LoggableHardware, AutoCloseable {
     m_spark.setPeriodicFramePeriod(CANSparkLowLevel.PeriodicFrame.kStatus5, 500);
     m_spark.setPeriodicFramePeriod(CANSparkLowLevel.PeriodicFrame.kStatus6, 500);
     m_spark.setCANMaxRetries(3);
-
-    // Restore defaults
-    m_spark.restoreFactoryDefaults();
-    m_spark.enableVoltageCompensation(MAX_VOLTAGE);
 
     // Fix velocity measurements
     if (getMotorType() == MotorType.kBrushless) {
